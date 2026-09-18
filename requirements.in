@@ -1,0 +1,12 @@
+streamlit
+pymupdf
+python-docx
+python-pptx
+rank-bm25
+pyvi
+sentence-transformers
+numpy
+openai
+python-dotenv
+pyyaml
+pytest

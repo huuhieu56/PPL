@@ -1,0 +1,22 @@
+paths:
+  data_dir: data
+  runs_dir: runs
+  database: data/app.db
+
+retrieval:
+  method: adaptive
+  tokenizer: whitespace
+  embedding_model: BAAI/bge-m3
+  reranker_model: BAAI/bge-reranker-v2-m3
+  top_l: 100
+  rerank_n: 20
+  context_k: 5
+  alpha: 0.5
+  adaptive_beta: 0.3
+  rrf_k: 60
+  refusal_threshold: 0.0
+  use_reranker: true
+
+generation:
+  temperature: 0
+  timeout_seconds: 60
