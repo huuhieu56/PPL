@@ -1,0 +1,19 @@
+.worktrees/
+.venv/
+.env
+__pycache__/
+.pytest_cache/
+*.py[cod]
+
+# Local research inputs and generated artifacts
+*.docx
+sample.pdf
+data/raw/
+data/processed/
+data/indexes/
+runs/
+
+# Local model caches and databases
+.cache/
+*.db
+*.sqlite3
