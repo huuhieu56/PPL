@@ -1,5 +1,6 @@
 import csv
 import json
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -11,6 +12,7 @@ from src.evaluation import evaluate_rankings
 from src.experiments import run_experiment
 from src.ingestion import build_corpus, chunk_pages, extract_document
 from src.models import Chunk, RagConfig
+from src.rag import answer_question
 from src.retrieval import adaptive_alpha, fuse_weighted, minmax_scores
 from src.storage import Database
 
@@ -75,7 +77,7 @@ def test_ingestion_preserves_source_and_reading_order(tmp_path):
     assert db.get_active_corpus() is None
 
 
-def test_retrieval_fusion_and_metrics():
+def test_retrieval_fusion_and_metrics(monkeypatch):
     chunks = {
         "c1": Chunk("c1", "d1", "AI101", "slide", 1, "Mã môn", "Mã môn AI101"),
         "c2": Chunk("c2", "d1", "AI101", "slide", 2, "Khái niệm", "Giải thích học máy"),
@@ -106,6 +108,41 @@ def test_retrieval_fusion_and_metrics():
     )
     assert metrics["hit_rate@1"] == 1.0
     assert metrics["mrr@10"] == 1.0
+
+    monkeypatch.setattr("src.rag.retrieve", lambda query, index, config: fused)
+
+    class FakeCompletions:
+        def __init__(self):
+            self.calls = 0
+
+        def create(self, **kwargs):
+            self.calls += 1
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="Theo tài liệu [1] và [99]."))],
+                usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5),
+            )
+
+    completions = FakeCompletions()
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    answer = answer_question(
+        "Mã môn AI101 là gì?",
+        index=object(),
+        config=RagConfig(method="weighted", use_reranker=False),
+        client=client,
+        model="test-model",
+    )
+    assert "[1]" in answer.text and "[99]" not in answer.text
+    assert answer.citations[0]["chunk_id"] == "c1"
+
+    refused = answer_question(
+        "Câu hỏi ngoài tài liệu",
+        index=object(),
+        config=RagConfig(method="weighted", refusal_threshold=2.0, use_reranker=False),
+        client=client,
+        model="test-model",
+    )
+    assert refused.refused is True
+    assert completions.calls == 1
 
 
 def test_experiment_run_resumes_without_repeating_completed_queries(tmp_path, monkeypatch):
