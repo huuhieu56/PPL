@@ -4,8 +4,10 @@ from pptx import Presentation
 from pptx.util import Inches
 
 from src.config import load_settings
+from src.evaluation import evaluate_rankings
 from src.ingestion import build_corpus, chunk_pages, extract_document
-from src.models import RagConfig
+from src.models import Chunk, RagConfig
+from src.retrieval import adaptive_alpha, fuse_weighted, minmax_scores
 from src.storage import Database
 
 
@@ -67,3 +69,36 @@ def test_ingestion_preserves_source_and_reading_order(tmp_path):
     assert result.chunk_count == len(chunks)
     assert result.chunks_path.exists()
     assert db.get_active_corpus() is None
+
+
+def test_retrieval_fusion_and_metrics():
+    chunks = {
+        "c1": Chunk("c1", "d1", "AI101", "slide", 1, "Mã môn", "Mã môn AI101"),
+        "c2": Chunk("c2", "d1", "AI101", "slide", 2, "Khái niệm", "Giải thích học máy"),
+    }
+    assert minmax_scores({"c1": 5.0, "c2": 5.0}) == {"c1": 1.0, "c2": 1.0}
+
+    exact_alpha, exact_signals = adaptive_alpha(
+        "Mã môn AI101 là gì?", alpha0=0.5, beta=0.3, idf={"ai101": 1.0}
+    )
+    semantic_alpha, _ = adaptive_alpha(
+        "Giải thích học máy", alpha0=0.5, beta=0.3, idf={"học": 0.1, "máy": 0.1}
+    )
+    assert exact_signals["code"] == 1.0
+    assert exact_alpha > semantic_alpha
+
+    fused = fuse_weighted(
+        bm25_scores={"c1": 8.0, "c2": 1.0},
+        dense_scores={"c1": 0.6, "c2": 0.5},
+        chunks=chunks,
+        alpha=0.7,
+    )
+    assert fused[0].chunk.chunk_id == "c1"
+
+    metrics = evaluate_rankings(
+        rankings={"q1": ["c1", "c2"]},
+        qrels={"q1": {"c1": 2}},
+        ks=(1, 10),
+    )
+    assert metrics["hit_rate@1"] == 1.0
+    assert metrics["mrr@10"] == 1.0
