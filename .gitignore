@@ -12,6 +12,7 @@ data/raw/
 data/processed/
 data/indexes/
 runs/
+configs/generated_experiment.yaml
 
 # Local model caches and databases
 .cache/
