@@ -63,7 +63,7 @@ README.md                      # cài đặt, chạy demo, chạy benchmark
 **Interfaces:**
 - Produces: `Settings`, `Chunk`, `SearchResult`, `RagConfig`, `Database`, `load_settings()`, `load_yaml(path)`.
 
-- [ ] **Step 1: Khởi tạo Git và môi trường Python 3.11**
+- [x] **Step 1: Khởi tạo Git và môi trường Python 3.11**
 
 Run:
 
@@ -74,7 +74,7 @@ uv venv --python 3.11 .venv
 
 Expected: `.git/` và `.venv/` được tạo; `.venv/bin/python --version` là Python 3.11.x.
 
-- [ ] **Step 2: Khai báo dependency tối thiểu và khóa phiên bản**
+- [x] **Step 2: Khai báo dependency tối thiểu và khóa phiên bản**
 
 `requirements.in`:
 
@@ -100,7 +100,7 @@ uv pip compile requirements.in -o requirements.txt
 uv pip install --python .venv/bin/python -r requirements.txt
 ```
 
-- [ ] **Step 3: Tạo model/config contracts**
+- [x] **Step 3: Tạo model/config contracts**
 
 Implement these exact public types in `src/models.py`:
 
@@ -136,7 +136,7 @@ class RagConfig:
 
 Implement `Settings` in `src/config.py` with paths and OpenAI-compatible env values. `load_settings()` must create `data/`, `runs/` and the SQLite parent directory without printing secrets.
 
-- [ ] **Step 4: Tạo SQLite schema và repository tối thiểu**
+- [x] **Step 4: Tạo SQLite schema và repository tối thiểu**
 
 `Database.initialize()` creates tables: `users`, `documents`, `corpus_versions`, `rag_configs`, `chat_sessions`, `messages`, `feedback`, `experiment_runs`. Add only methods used by later tasks:
 
@@ -155,7 +155,7 @@ Database.save_run(record: dict) -> None
 Database.update_run(run_id: str, status: str, result_path: str | None) -> None
 ```
 
-- [ ] **Step 5: Viết một test storage/config duy nhất**
+- [x] **Step 5: Viết một test storage/config duy nhất**
 
 Add this first behavior test to `tests/test_core.py`:
 
@@ -180,7 +180,7 @@ def test_foundation_round_trip(tmp_path, monkeypatch):
     assert "must-not-be-persisted" not in json.dumps(saved)
 ```
 
-- [ ] **Step 6: Chạy test và commit**
+- [x] **Step 6: Chạy test và commit**
 
 Run:
 
@@ -204,7 +204,7 @@ Expected: `1 passed`.
 - Consumes: `Chunk`, `Settings`, `Database`.
 - Produces: `extract_document(path: Path) -> list[PageText]`, `chunk_pages(pages: list[PageText], *, doc_id: str, course: str, source_type: str, chunk_tokens: int, overlap_tokens: int) -> list[Chunk]`, `build_corpus(files: list[Path], metadata: dict[str, dict], settings: Settings, database: Database, config: dict) -> CorpusBuildResult`, `tokenize_vi(text: str, mode: str) -> list[str]`.
 
-- [ ] **Step 1: Viết test ingestion theo hành vi**
+- [x] **Step 1: Viết test ingestion theo hành vi**
 
 Add this one ingestion test; it creates its own fixture rather than committing a binary PPTX:
 
@@ -238,13 +238,13 @@ def test_ingestion_preserves_source_and_reading_order(tmp_path):
     assert all(c.doc_id == "doc-1" and c.course == "AI101" and c.page == 1 and c.text for c in chunks)
 ```
 
-- [ ] **Step 2: Chạy test để xác nhận thất bại**
+- [x] **Step 2: Chạy test để xác nhận thất bại**
 
 Run: `.venv/bin/pytest tests/test_core.py::test_ingestion_preserves_source_and_reading_order -q`
 
 Expected: FAIL because `src.ingestion` does not exist.
 
-- [ ] **Step 3: Implement extraction and reading order**
+- [x] **Step 3: Implement extraction and reading order**
 
 Use PyMuPDF pages, DOCX paragraphs/tables, and PPTX shapes. For a PDF page without a text layer, call PyMuPDF OCR only when local Tesseract is available; otherwise retain a structured extraction warning for the admin preview. For PPTX: title first; recursively flatten groups; group remaining text shapes into horizontal bands using their top coordinate; sort bands top-to-bottom and shapes left-to-right; serialize table cells row-by-row. Ignore empty/decorative shapes.
 
@@ -265,15 +265,15 @@ class CorpusBuildResult:
     manifest_hash: str
 ```
 
-- [ ] **Step 4: Implement chunking and immutable corpus version**
+- [x] **Step 4: Implement chunking and immutable corpus version**
 
 Chunk by heading with token-window fallback. Default 450 tokens/75 overlap. Derive deterministic `doc_id` and `chunk_id` from SHA-256, write UTF-8 `chunks.jsonl`, `manifest.json`, and register the version in SQLite. Never modify an existing version directory.
 
-- [ ] **Step 5: Implement tokenizer modes**
+- [x] **Step 5: Implement tokenizer modes**
 
 `tokenize_vi(text, "whitespace")` lowercases and splits whitespace; `tokenize_vi(text, "pyvi")` uses `ViTokenizer.tokenize(text)` and returns underscore-joined compound words as tokens. Corpus and query must call the same mode from config.
 
-- [ ] **Step 6: Run test and commit**
+- [x] **Step 6: Run test and commit**
 
 Run:
 
@@ -297,7 +297,7 @@ Expected: `2 passed`.
 - Consumes: `Chunk`, `SearchResult`, `RagConfig`, `tokenize_vi`.
 - Produces: `RetrievalIndex.build(chunks, output_dir, tokenizer_mode, embedding_model)`, `RetrievalIndex.load(index_dir)`, `retrieve(query, index, config) -> list[SearchResult]`, `minmax_scores(scores: dict[str, float]) -> dict[str, float]`, `adaptive_alpha(query, alpha0, beta, idf) -> tuple[float, dict[str, float]]`, `fuse_weighted(bm25_scores, dense_scores, chunks, alpha) -> list[SearchResult]`, `fuse_rrf(result_lists, rrf_k) -> list[SearchResult]`, `rerank(query, results, limit) -> list[SearchResult]`, `evaluate_rankings(rankings, qrels, ks) -> dict[str, float]`.
 
-- [ ] **Step 1: Viết một test retrieval tổng hợp**
+- [x] **Step 1: Viết một test retrieval tổng hợp**
 
 Add this third test with in-memory chunks; later Task 5 extends the same test rather than adding another one:
 
@@ -342,31 +342,31 @@ def test_retrieval_fusion_and_metrics():
 
 This single test covers normalization, adaptive behavior, ranking and metric correctness.
 
-- [ ] **Step 2: Chạy test để xác nhận thất bại**
+- [x] **Step 2: Chạy test để xác nhận thất bại**
 
 Run: `.venv/bin/pytest tests/test_core.py::test_retrieval_fusion_and_metrics -q`
 
 Expected: FAIL on missing retrieval module.
 
-- [ ] **Step 3: Implement persistent BM25 and dense index**
+- [x] **Step 3: Implement persistent BM25 and dense index**
 
 `RetrievalIndex.build(chunks, output_dir, tokenizer_mode, embedding_model)` writes `chunks.jsonl`, dense `embeddings.npy`, `index_meta.json`, and BM25 token data. `load()` verifies chunk/hash/model metadata. Use normalized embeddings and NumPy matrix multiplication; do not add FAISS.
 
-- [ ] **Step 4: Implement fusion exactly as specified**
+- [x] **Step 4: Implement fusion exactly as specified**
 
 For Weighted Sum: retrieve top-L from both branches, union by `chunk_id`, min-max each returned list, use 0 for missing results and 1 for every returned result when all scores tie. Implement RRF as `sum(1 / (rrf_k + rank))`. Sort deterministically by descending score then `chunk_id`.
 
 `adaptive_alpha()` computes digit, symbol, code-pattern and max-IDF signals; clips to `[0.1, 0.9]`; returns the chosen alpha plus a signal dictionary for logging.
 
-- [ ] **Step 5: Implement reranker with CPU-safe defaults**
+- [x] **Step 5: Implement reranker with CPU-safe defaults**
 
 Load `BAAI/bge-reranker-v2-m3` lazily, score `(query, text)` pairs in batches, default candidate count 20, preserve source metadata, and record rerank latency. When disabled, return input order unchanged.
 
-- [ ] **Step 6: Implement evaluation**
+- [x] **Step 6: Implement evaluation**
 
 Calculate Hit Rate@K, MRR@10, NDCG@K, Precision@K, Recall@K and per-query rows. Add paired bootstrap CI with an explicit seed. Write `metrics.json` and `per_query.csv`.
 
-- [ ] **Step 7: Run tests and commit**
+- [x] **Step 7: Run tests and commit**
 
 Run:
 
@@ -390,7 +390,7 @@ Expected: `3 passed`.
 - Consumes: retrieval/evaluation interfaces and JSONL queries/qrels.
 - Produces: `run_experiment(config_path) -> Path`, `runs/<run_id>/{config,status,metrics,per_query,errors}`.
 
-- [ ] **Step 1: Viết test end-to-end CLI/resume duy nhất**
+- [x] **Step 1: Viết test end-to-end CLI/resume duy nhất**
 
 Add the fourth behavior test. `run_experiment()` accepts `resume_run_id` only for resuming an existing run; `execute_query()` is the single query execution seam:
 
@@ -445,25 +445,25 @@ def test_experiment_run_resumes_without_repeating_completed_queries(tmp_path, mo
     assert {row["query_id"] for row in rows} == {"q1", "q2"}
 ```
 
-- [ ] **Step 2: Chạy test để xác nhận thất bại**
+- [x] **Step 2: Chạy test để xác nhận thất bại**
 
 Run: `.venv/bin/pytest tests/test_core.py::test_experiment_run_resumes_without_repeating_completed_queries -q`
 
 Expected: FAIL on missing experiment runner.
 
-- [ ] **Step 3: Implement config validation and run identity**
+- [x] **Step 3: Implement config validation and run identity**
 
 Validate corpus path, query/qrels schema, method names E0–E7, K values and model identifiers. Derive `run_id` from timestamp plus a short hash of frozen config and data hashes. Copy the resolved config to the run directory.
 
-- [ ] **Step 4: Implement checkpoint/resume**
+- [x] **Step 4: Implement checkpoint/resume**
 
 Append one JSONL record per completed query, flush immediately, skip completed `(experiment_id, query_id)` pairs on resume, and write errors without stopping unrelated queries. Aggregate CSV/metrics only from checkpoint records.
 
-- [ ] **Step 5: Implement CLI**
+- [x] **Step 5: Implement CLI**
 
 `run_experiments.py` accepts `--config`, `--resume <run_id>` and `--dry-run`. `--dry-run` validates files/models/config without loading heavy models.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run:
 
@@ -487,29 +487,29 @@ Expected: `4 passed`.
 - Consumes: active `RetrievalIndex`, optional reranker, `RagConfig`, OpenAI-compatible settings.
 - Produces: `answer_question(query, index, config, client) -> RagAnswer`.
 
-- [ ] **Step 1: Mở rộng test retrieval hiện có thay vì tạo test mới**
+- [x] **Step 1: Mở rộng test retrieval hiện có thay vì tạo test mới**
 
 Extend `test_retrieval_fusion_and_metrics` with a fake OpenAI client. Assert a grounded answer maps `[1]` to a real chunk; invalid citation `[99]` is removed; below-threshold retrieval returns the refusal string without invoking the fake client.
 
-- [ ] **Step 2: Chạy test để xác nhận thất bại**
+- [x] **Step 2: Chạy test để xác nhận thất bại**
 
 Run: `.venv/bin/pytest tests/test_core.py::test_retrieval_fusion_and_metrics -q`
 
 Expected: FAIL because `answer_question` is absent.
 
-- [ ] **Step 3: Implement prompt and API call**
+- [x] **Step 3: Implement prompt and API call**
 
 Build numbered context with strict Vietnamese grounding instructions. Call the configured OpenAI-compatible chat completion with temperature 0, timeout and at most two retries using short exponential backoff. Return token usage and stage latencies.
 
-- [ ] **Step 4: Implement refusal and citation validation**
+- [x] **Step 4: Implement refusal and citation validation**
 
 Calibrate method-specific thresholds from config. If confidence is below threshold, do not call the API. Parse only citations present in supplied context, remove invalid markers, and return citation metadata containing `chunk_id`, document, page/slide and section.
 
-- [ ] **Step 5: Implement blinded RAG evaluation export**
+- [x] **Step 5: Implement blinded RAG evaluation export**
 
 `run_rag_evaluation.py --config <path>` runs the same selected test questions through Dense RAG, best fixed Hybrid RAG and E7 using identical LLM/prompt/temperature/context budget. Randomize system order per query with a fixed seed and write `rag_answers_blinded.csv` containing `item_id`, query, answer, citations, latency, input/output tokens plus empty human columns `correctness_1_5`, `faithfulness_1_5`, `citation_correct_0_1`, `notes`. A second `--summarize <completed.csv>` mode validates filled scores and writes aggregate JSON without calling the LLM.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run:
 
@@ -533,27 +533,27 @@ Expected: `4 passed`.
 - Consumes: all core modules; no duplicate retrieval/RAG logic in pages.
 - Produces: working two-role local UI.
 
-- [ ] **Step 1: Implement local authentication**
+- [x] **Step 1: Implement local authentication**
 
 Use standard-library `hashlib.scrypt` with per-user salts. Seed `ADMIN_USERNAME/ADMIN_PASSWORD` and `STUDENT_USERNAME/STUDENT_PASSWORD` from environment on first start. Store only salt/hash and role. `require_role(*roles)` stops unauthorized pages.
 
-- [ ] **Step 2: Implement student chat page**
+- [x] **Step 2: Implement student chat page**
 
 Use `st.chat_input`, keep visible session history, call `answer_question`, render citations in expanders, show total latency, and save thumbs-up/down plus optional comment. Do not show secrets or raw system prompts.
 
-- [ ] **Step 3: Implement document admin page**
+- [x] **Step 3: Implement document admin page**
 
 Validate PDF/DOCX/PPTX extension and size, sanitize names, save inside the data root, collect course/type/semester, preview extracted pages/chunks, build a new immutable corpus version, and activate it only after successful index creation.
 
-- [ ] **Step 4: Implement RAG configuration page**
+- [x] **Step 4: Implement RAG configuration page**
 
 Expose method, reranker toggle, top-L, rerank-N, context-K, alpha, RRF k, refusal threshold, model and temperature. Validate ranges and store named configurations in SQLite.
 
-- [ ] **Step 5: Implement experiment result page**
+- [x] **Step 5: Implement experiment result page**
 
 Create validated YAML config files, display the exact CLI command, list `runs/`, read status/metrics/errors, filter results and offer CSV/JSON downloads. Do not execute the benchmark inside Streamlit.
 
-- [ ] **Step 6: Manual smoke check and commit**
+- [x] **Step 6: Manual smoke check and commit**
 
 Run:
 
@@ -582,15 +582,15 @@ git commit -m "feat: add Streamlit student and admin workflows"
 - Consumes: complete system.
 - Produces: reproducible local setup and operator instructions.
 
-- [ ] **Step 1: Write README with exact commands**
+- [x] **Step 1: Write README with exact commands**
 
 Document Python 3.11 setup, dependency install, optional local Tesseract, `.env`, Streamlit start, document ingestion, benchmark schemas, `--dry-run`, actual run, resume, blinded RAG evaluation, artifact interpretation and test command. State that test-set results must not be opened before configuration lock.
 
-- [ ] **Step 2: Add tiny example benchmark**
+- [x] **Step 2: Add tiny example benchmark**
 
 Provide two schema-valid example queries and qrels referencing clearly marked example chunk IDs. They demonstrate file shape only and are not research data.
 
-- [ ] **Step 3: Run automated verification**
+- [x] **Step 3: Run automated verification**
 
 Run:
 
@@ -601,11 +601,11 @@ Run:
 
 Expected: exactly `4 passed`; dry-run validates or reports only the explicitly missing real corpus/benchmark paths without loading models.
 
-- [ ] **Step 4: Run final local smoke test**
+- [x] **Step 4: Run final local smoke test**
 
 Run Streamlit, ingest one small document, build an index, ask one grounded and one unanswerable question, save feedback, then verify the SQLite rows and citations displayed in UI.
 
-- [ ] **Step 5: Check secret/data hygiene and commit**
+- [x] **Step 5: Check secret/data hygiene and commit**
 
 Run:
 
