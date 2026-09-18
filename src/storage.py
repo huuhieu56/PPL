@@ -90,3 +90,61 @@ class Database:
             {"name": row["name"], "config": json.loads(row["config_json"]), "updated_at": row["updated_at"]}
             for row in rows
         ]
+
+    def save_document(self, record: dict) -> None:
+        payload = {key: value for key, value in record.items() if key not in {"doc_id", "status"}}
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO documents(doc_id, metadata_json, status) VALUES (?, ?, ?)
+                ON CONFLICT(doc_id) DO UPDATE SET
+                    metadata_json = excluded.metadata_json,
+                    status = excluded.status
+                """,
+                (record["doc_id"], json.dumps(payload, ensure_ascii=False), record["status"]),
+            )
+
+    def list_documents(self) -> list[dict]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT doc_id, metadata_json, status, created_at FROM documents ORDER BY created_at"
+            ).fetchall()
+        return [
+            {
+                "doc_id": row["doc_id"],
+                **json.loads(row["metadata_json"]),
+                "status": row["status"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    def save_corpus_version(self, record: dict) -> None:
+        version_id = record["version_id"]
+        payload = {key: value for key, value in record.items() if key != "version_id"}
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO corpus_versions(version_id, metadata_json) VALUES (?, ?)",
+                (version_id, json.dumps(payload, ensure_ascii=False)),
+            )
+
+    def get_active_corpus(self) -> dict | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT version_id, metadata_json FROM corpus_versions WHERE active = 1 LIMIT 1"
+            ).fetchone()
+        if row is None:
+            return None
+        return {"version_id": row["version_id"], **json.loads(row["metadata_json"])}
+
+    def set_active_corpus(self, version_id: str) -> None:
+        with self._connect() as connection:
+            exists = connection.execute(
+                "SELECT 1 FROM corpus_versions WHERE version_id = ?", (version_id,)
+            ).fetchone()
+            if exists is None:
+                raise KeyError(f"Unknown corpus version: {version_id}")
+            connection.execute("UPDATE corpus_versions SET active = 0")
+            connection.execute(
+                "UPDATE corpus_versions SET active = 1 WHERE version_id = ?", (version_id,)
+            )
