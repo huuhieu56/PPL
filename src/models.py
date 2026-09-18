@@ -33,6 +33,8 @@ class RagConfig:
     rrf_k: int = 60
     refusal_threshold: float = 0.0
     use_reranker: bool = True
+    model: str = ""
+    temperature: float = 0.0
 
     def to_dict(self) -> dict:
         return asdict(self)

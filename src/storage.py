@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import uuid
 from pathlib import Path
 
 from src.models import RagConfig
@@ -91,6 +92,27 @@ class Database:
             for row in rows
         ]
 
+    def upsert_user(self, username: str, password_hash: str, salt: str, role: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO users(username, password_hash, salt, role) VALUES (?, ?, ?, ?)
+                ON CONFLICT(username) DO UPDATE SET
+                    password_hash = excluded.password_hash,
+                    salt = excluded.salt,
+                    role = excluded.role
+                """,
+                (username, password_hash, salt, role),
+            )
+
+    def get_user(self, username: str) -> dict | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT username, password_hash, salt, role FROM users WHERE username = ?",
+                (username,),
+            ).fetchone()
+        return dict(row) if row else None
+
     def save_document(self, record: dict) -> None:
         payload = {key: value for key, value in record.items() if key not in {"doc_id", "status"}}
         with self._connect() as connection:
@@ -148,3 +170,23 @@ class Database:
             connection.execute(
                 "UPDATE corpus_versions SET active = 1 WHERE version_id = ?", (version_id,)
             )
+
+    def save_message(self, record: dict) -> str:
+        message_id = record.get("message_id", uuid.uuid4().hex)
+        payload = {key: value for key, value in record.items() if key not in {"message_id", "session_id"}}
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO messages(message_id, session_id, payload_json) VALUES (?, ?, ?)",
+                (message_id, record["session_id"], json.dumps(payload, ensure_ascii=False)),
+            )
+        return message_id
+
+    def save_feedback(self, record: dict) -> str:
+        feedback_id = record.get("feedback_id", uuid.uuid4().hex)
+        payload = {key: value for key, value in record.items() if key not in {"feedback_id", "message_id"}}
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO feedback(feedback_id, message_id, payload_json) VALUES (?, ?, ?)",
+                (feedback_id, record["message_id"], json.dumps(payload, ensure_ascii=False)),
+            )
+        return feedback_id
