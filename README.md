@@ -108,7 +108,4 @@ The project intentionally has four behavior-level tests rather than tests genera
 
 The example experiment config validates structure only; its index directory is not a real searchable index.
 
-## Research artifacts
 
-- System/research design: `RESEARCH_EXPERIMENT_PLAN.md`
-- Implementation plan: `docs/superpowers/plans/2026-09-18-rag-system.md`
