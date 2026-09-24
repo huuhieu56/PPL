@@ -46,3 +46,18 @@ def test_chat_page_without_active_corpus_shows_info(tmp_path, monkeypatch):
     app.run()
     assert not app.exception
     assert app.info
+
+
+def test_experiments_page_warns_on_lock_violation(tmp_path, monkeypatch):
+    _env(tmp_path, monkeypatch)
+    run_dir = tmp_path / "runs" / "20260101T000000Z-test-abcd1234"
+    (run_dir / "report").mkdir(parents=True)
+    (run_dir / "status.json").write_text('{"status": "completed"}', encoding="utf-8")
+    (run_dir / "config.json").write_text('{"split": "test", "lock": {"lock_violation": true}}', encoding="utf-8")
+    (run_dir / "report" / "table_3_5.md").write_text("**Bảng 3.5. Kết quả tổng thể trên tập test**", encoding="utf-8")
+    app = AppTest.from_file(str(PAGES / "4_Experiments.py"), default_timeout=30)
+    app.session_state["user"] = {"username": "admin", "role": "admin"}
+    app.run()
+    assert not app.exception
+    assert any("khóa" in warning.value for warning in app.warning)
+    assert any("Bảng 3.5" in block.value for block in app.markdown)

@@ -3,6 +3,7 @@ import json
 import sys
 from pathlib import Path
 
+import yaml
 from openai import OpenAI
 
 from src.bench.agreement import agreement_report, merge_labels, read_annotations, write_disagreements
@@ -15,6 +16,12 @@ from src.bench.review import export_review, import_review
 from src.bench.split import split_queries
 from src.cache import RetrievalCache
 from src.config import load_settings, load_yaml
+from src.eval.compare import compare_run
+from src.eval.errors import classify_failures, export_error_sample, summarize_causes
+from src.eval.report import build_report
+from src.eval.runner import default_pipeline_factory, load_benchmark, run_evaluation
+from src.eval.spec import DEFAULT_FROZEN, load_spec, read_frozen, resolve_configs
+from src.eval.tune import tune
 from src.index import RetrievalIndex, load_encoder
 from src.indexing import build_index_from_folder, resolve_index_dir
 from src.io_utils import read_csv, read_jsonl, write_jsonl
@@ -164,6 +171,83 @@ def _bench_remap(args) -> int:
     return 0
 
 
+def _eval_context(args):
+    settings, database = _context()
+    spec = load_spec(args.config, settings)
+    index_dir = spec.index_dir or resolve_index_dir(None, settings, database)
+    return settings, spec, index_dir
+
+
+def _eval_tune(args) -> int:
+    settings, spec, index_dir = _eval_context(args)
+    path = tune(spec, index_dir=index_dir, pipeline_factory=default_pipeline_factory(settings), force=args.force)
+    _print({"frozen_params": str(path), **yaml.safe_load(path.read_text(encoding="utf-8"))})
+    return 0
+
+
+def _eval_run(args) -> int:
+    settings, spec, index_dir = _eval_context(args)
+    frozen = read_frozen(spec)
+    if args.dry_run:
+        entries = resolve_configs(spec, frozen or DEFAULT_FROZEN)
+        warnings = []
+        for name, entry in entries.items():
+            directory = entry.index_dir or index_dir
+            meta_path = directory / "index_meta.json"
+            if not meta_path.exists():
+                warnings.append(f"{name}: index not built at {directory}")
+            elif entry.pipeline.sparse and entry.pipeline.tokenizer not in json.loads(meta_path.read_text(encoding="utf-8"))["tokenizers"]:
+                warnings.append(f"{name}: tokenizer {entry.pipeline.tokenizer} missing in {directory}")
+        queries, _, _ = load_benchmark(spec.bench_dir, args.split)
+        _print({"status": "valid", "split": args.split, "queries": len(queries), "frozen": frozen is not None,
+                "configs": list(entries), "warnings": warnings})
+        return 0
+    only = [name.strip() for name in args.only.split(",")] if args.only else None
+    run_dir = run_evaluation(spec, args.split, index_dir=index_dir, pipeline_factory=default_pipeline_factory(settings),
+                             frozen=frozen, resume_run_id=args.resume, only=only, latency=not args.no_latency)
+    _print({"run_dir": str(run_dir)})
+    return 0
+
+
+def _eval_compare(args) -> int:
+    _, spec, _ = _eval_context(args)
+    rows = compare_run(args.run, spec, read_frozen(spec))
+    _print({"comparisons": len(rows), "file": str(Path(args.run) / "comparisons.csv")})
+    return 0
+
+
+def _eval_errors(args) -> int:
+    _, spec, _ = _eval_context(args)
+    run_dir = Path(args.run)
+    if args.summarize:
+        summary = summarize_causes(args.summarize)
+        (run_dir / "errors_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        _print(summary)
+        return 0
+    target = spec.error_analysis["target"]
+    record = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
+    index = RetrievalIndex.load(record["configs"][target]["index_dir"])
+    failures = classify_failures(run_dir, target, int(spec.error_analysis["k"]))
+    queries, _, _ = load_benchmark(spec.bench_dir, record["split"])
+    rows = export_error_sample(failures, queries, index.chunks, run_dir / "error_sample.csv",
+                               int(spec.error_analysis["sample"]), spec.seed)
+    stages = {}
+    for failure in failures:
+        stages[failure["stage"]] = stages.get(failure["stage"], 0) + 1
+    (run_dir / "errors_summary.json").write_text(
+        json.dumps({"by_stage": stages, "rows": [{"stage": s, "cause": "unlabeled", "count": c} for s, c in sorted(stages.items())]},
+                   ensure_ascii=False, indent=2), encoding="utf-8")
+    _print({"failures": len(failures), "by_stage": stages, "sample": str(run_dir / "error_sample.csv"), "sample_rows": len(rows)})
+    return 0
+
+
+def _eval_report(args) -> int:
+    _, spec, _ = _eval_context(args)
+    written = build_report(args.run, spec.bench_dir, spec.primary_metric)
+    _print({"written": [str(path) for path in written]})
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m src.cli")
     groups = parser.add_subparsers(dest="group", required=True)
@@ -215,6 +299,26 @@ def build_parser() -> argparse.ArgumentParser:
     remap = bench_command("remap", _bench_remap)
     remap.add_argument("--target-index", required=True)
     remap.add_argument("--out", required=True)
+    evaluation = groups.add_parser("eval").add_subparsers(dest="command", required=True)
+
+    def eval_command(name, handler):
+        command = evaluation.add_parser(name)
+        command.add_argument("--config", default="configs/experiment.yaml")
+        command.set_defaults(handler=handler)
+        return command
+
+    eval_command("tune", _eval_tune).add_argument("--force", action="store_true")
+    run = eval_command("run", _eval_run)
+    run.add_argument("--split", choices=["dev", "test", "all"], required=True)
+    run.add_argument("--resume")
+    run.add_argument("--only")
+    run.add_argument("--no-latency", action="store_true")
+    run.add_argument("--dry-run", action="store_true")
+    eval_command("compare", _eval_compare).add_argument("--run", required=True)
+    errors = eval_command("errors", _eval_errors)
+    errors.add_argument("--run", required=True)
+    errors.add_argument("--summarize")
+    eval_command("report", _eval_report).add_argument("--run", required=True)
     return parser
 
 
