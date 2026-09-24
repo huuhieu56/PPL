@@ -2,9 +2,7 @@ import re
 import time
 from dataclasses import dataclass
 
-from src.models import RagConfig
-from src.reranking import rerank
-from src.retrieval import RetrievalIndex, retrieve
+from src.models import PipelineConfig
 
 
 REFUSAL_TEXT = "Không tìm thấy đủ thông tin trong tài liệu để trả lời câu hỏi này."
@@ -72,17 +70,14 @@ def _valid_citations(text: str, results) -> tuple[str, list[dict]]:
 
 def answer_question(
     query: str,
-    index: RetrievalIndex,
-    config: RagConfig,
+    pipeline,
+    config: PipelineConfig,
     client,
     model: str,
 ) -> RagAnswer:
-    retrieval_started = time.perf_counter()
-    results = retrieve(query, index, config)
-    if config.use_reranker:
-        results, _ = rerank(query, results, config.rerank_n)
-    results = results[: config.context_k]
-    retrieval_ms = (time.perf_counter() - retrieval_started) * 1000
+    retrieval = pipeline.run(query, config, use_cache=False)
+    results = retrieval.results[: config.context_k]
+    retrieval_ms = retrieval.timings_ms["total"]
     confidence = results[0].score if results else float("-inf")
     if confidence < config.refusal_threshold:
         return RagAnswer(REFUSAL_TEXT, [], True, 0, 0, retrieval_ms, 0.0)
@@ -95,8 +90,8 @@ def answer_question(
             response = client.chat.completions.create(
                 model=model,
                 messages=_prompt(query, results),
-                temperature=0,
-                timeout=60,
+                temperature=config.temperature,
+                timeout=config.timeout_seconds,
             )
             break
         except Exception as error:
@@ -108,11 +103,10 @@ def answer_question(
         raise RuntimeError("LLM did not return a response") from last_error
     text, citations = _valid_citations(response.choices[0].message.content or "", results)
     usage = getattr(response, "usage", None)
-    refused = text.strip() == REFUSAL_TEXT
     return RagAnswer(
         text=text,
         citations=citations,
-        refused=refused,
+        refused=text.strip() == REFUSAL_TEXT,
         prompt_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
         completion_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
         retrieval_ms=retrieval_ms,

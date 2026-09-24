@@ -1,16 +1,15 @@
 import csv
 import hashlib
 import json
-import time
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
 from src.config import load_yaml
 from src.evaluation import evaluate_rankings
-from src.models import RagConfig
-from src.reranking import rerank
-from src.retrieval import RetrievalIndex, retrieve
+from src.index import RetrievalIndex
+from src.models import PipelineConfig
+from src.pipeline import RetrievalPipeline
 
 
 def _read_jsonl(path: Path) -> list[dict]:
@@ -35,37 +34,39 @@ def validate_config(config: dict, require_index: bool = False) -> None:
         raise FileNotFoundError(f"index_dir not found: {config.get('index_dir', '')}")
 
 
+_LEGACY_METHODS = {
+    "bm25": {"sparse": True, "dense": False, "fusion": "none"},
+    "dense": {"sparse": False, "dense": True, "fusion": "none"},
+    "rrf": {"fusion": "rrf"},
+    "weighted": {"fusion": "weighted"},
+    "adaptive": {"fusion": "adaptive"},
+}
+
+
 @lru_cache(maxsize=2)
-def _load_index(path: str) -> RetrievalIndex:
-    return RetrievalIndex.load(path)
+def _load_pipeline(path: str) -> RetrievalPipeline:
+    return RetrievalPipeline(RetrievalIndex.load(path))
 
 
 def execute_query(experiment_id: str, query: dict, config: dict) -> dict:
     experiment = config["experiments"][experiment_id]
     retrieval_config = config.get("retrieval", {})
-    rag_config = RagConfig(
-        method=experiment["method"],
-        top_l=int(retrieval_config.get("top_l", 100)),
-        rerank_n=int(retrieval_config.get("rerank_n", 20)),
-        context_k=int(retrieval_config.get("context_k", 5)),
+    pipeline_config = PipelineConfig(
+        **_LEGACY_METHODS[experiment["method"]],
         alpha=float(experiment.get("alpha", 0.5)),
         rrf_k=int(experiment.get("rrf_k", 60)),
-        use_reranker=bool(experiment.get("use_reranker", False)),
+        rerank=bool(experiment.get("use_reranker", False)),
+        top_l=int(retrieval_config.get("top_l", 100)),
+        rerank_n=int(retrieval_config.get("rerank_n", 30)),
+        context_k=int(retrieval_config.get("context_k", 5)),
+        tokenizer=config.get("tokenizer", "whitespace"),
+        reranker_model=config.get("reranker_model", "BAAI/bge-reranker-v2-m3"),
     )
-    started = time.perf_counter()
-    results = retrieve(query["text"], _load_index(str(config["index_dir"])), rag_config)
-    rerank_ms = 0.0
-    if rag_config.use_reranker:
-        results, rerank_ms = rerank(
-            query["text"],
-            results,
-            rag_config.rerank_n,
-            config.get("reranker_model", "BAAI/bge-reranker-v2-m3"),
-        )
+    result = _load_pipeline(str(config["index_dir"])).run(query["text"], pipeline_config)
     return {
-        "ranked_chunk_ids": [result.chunk.chunk_id for result in results],
-        "latency_ms": (time.perf_counter() - started) * 1000,
-        "rerank_ms": rerank_ms,
+        "ranked_chunk_ids": [item.chunk.chunk_id for item in result.results],
+        "latency_ms": result.timings_ms["total"],
+        "rerank_ms": result.timings_ms["rerank"],
     }
 
 
