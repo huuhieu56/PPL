@@ -89,10 +89,10 @@ Output của bước trích xuất là `Block(page, heading_path: list[str], tex
 | Định dạng | Cách tìm tiêu đề |
 |---|---|
 | DOCX | Style `Heading 1..3` (và `Title`); cấp tiêu đề lấy theo style; bảng thành dòng `a \| b` như hiện tại |
-| PDF | Dùng `page.get_text("dict")` để lấy span, cỡ chữ và cờ bold. Một dòng là tiêu đề nếu thỏa **một** trong hai điều kiện: (a) khớp regex `^(Chương\|CHƯƠNG\|Bài\|BÀI)\s+[\dIVXLC]+`, hoặc `^\d+(\.\d+){0,3}\.?\s+\S`, và dòng ngắn hơn 120 ký tự; (b) cỡ chữ ≥ trung vị cỡ chữ của tài liệu × 1.2 và dòng ngắn hơn 120 ký tự. Cấp tiêu đề: "Chương/Bài" = 1, số `a.b` = số phần của số. OCR fallback giữ nguyên như hiện tại |
+| PDF | Dùng `page.get_text("dict")` để lấy span, cỡ chữ và cờ bold. Một dòng là tiêu đề nếu thỏa **một** trong hai điều kiện: (a) khớp regex `^(Chương\|CHƯƠNG\|Bài\|BÀI)\s+[\dIVXLC]+`, hoặc `^\d+(\.\d+){0,3}\.?\s+\S`, và dòng ngắn hơn 120 ký tự; (b) cỡ chữ ≥ trung vị cỡ chữ của tài liệu × 1.2 và dòng ngắn hơn 120 ký tự. Cấp tiêu đề: "Chương/Bài" = 1, số `a.b` = số phần của số. Tinh chỉnh khi lập kế hoạch: tiêu đề đánh số một cấp (`1. …`) chỉ được nhận khi in đậm hoặc cỡ chữ lớn (tránh nhầm với danh sách đánh số trong thân bài); nếu tài liệu có "Chương", cấp của tiêu đề đánh số được cộng thêm 1; dòng lặp lại trên > 50% số trang (header/footer, khi PDF ≥ 4 trang) bị bỏ qua. OCR fallback giữ nguyên như hiện tại |
 | PPTX | Tiêu đề slide là heading cấp 2 dưới tên tài liệu; thứ tự đọc giữ như hiện tại |
 
-`doc_title` lấy từ metadata của file, nếu không có thì dùng tên file bỏ phần mở rộng.
+`doc_title` lấy từ metadata người dùng cung cấp (cột `doc_title` trong CSV metadata của `index build`), nếu không có thì dùng tên file bỏ phần mở rộng (dấu `_` thành khoảng trắng). Không dùng trường title trong metadata PDF vì thường là rác (ví dụ "Microsoft Word - …").
 
 ### 4.3 Chunking
 - `structure` (mặc định):
