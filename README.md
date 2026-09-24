@@ -55,21 +55,31 @@ STUDENT_PASSWORD=change-this-password
 
 The first index build downloads `BAAI/bge-m3`. Enabling reranking downloads `BAAI/bge-reranker-v2-m3`. The default reranks the top 30 fused candidates.
 
-## Benchmark schema
+## Build the benchmark
 
-Each line of `queries.jsonl` must contain:
+Each command reads and writes files in `<data_dir>/benchmark/` (override with `--bench DIR`) and uses the active index (override with `--index DIR`):
 
-```json
-{"query_id":"q1","text":"Câu hỏi","category":"concept","split":"test"}
+```bash
+python -m src.cli index build --input path/to/docs --course CS101        # index + activate
+python -m src.cli bench generate --per-category 60                         # LLM drafts → drafts.jsonl, rejected.jsonl
+python -m src.cli bench review-export                                      # review.csv: action keep/edit/drop
+python -m src.cli bench review-import --human human_queries.csv            # queries.jsonl (+ human-written questions)
+python -m src.cli bench pool --depth 15 --annotators A,B                   # annotation_A.csv, annotation_B.csv
+python -m src.cli bench agreement --annotations annotation_A.csv annotation_B.csv [--resolved disagreements.csv]
+python -m src.cli bench split --dev 0.3 --seed 42                          # dev/test + benchmark_manifest.json
+python -m src.cli bench describe                                           # benchmark_description.json
+python -m src.cli bench remap --target-index DIR --out qrels_remapped.jsonl  # relabel for another chunking
 ```
 
-Each line of `qrels.jsonl` represents one graded relevance judgment:
+File formats:
 
-```json
-{"query_id":"q1","chunk_id":"chunk-id","relevance":2}
-```
+- `queries.jsonl`: `query_id, text, category (exact|concept|paraphrase|multi), origin (llm|human), split, source_chunk_ids, evidence, generator`
+- `qrels.jsonl`: `query_id, chunk_id, relevance (0|1|2)`
+- `evidence.jsonl`: `query_id, doc_id, page, quote, relevance`
+- `human_queries.csv`: `text, category[, query_id]`
+- `manual_additions.csv`: `query_id, chunk_id`
 
-Relevance is `0` (irrelevant), `1` (supporting), or `2` (direct answer). Example-only files are under `data/benchmark/`; replace their chunk IDs with IDs from the active corpus.
+Annotators fill `relevance` (0 = irrelevant, 1 = supporting, 2 = direct answer) and, when relevance ≥ 1, `evidence_quote` (a verbatim excerpt from the chunk). Have both annotators label at least 30% of the questions so κ is meaningful. Queries with no relevant chunk are dropped at `split`.
 
 ## Run retrieval experiments
 

@@ -22,6 +22,11 @@ cp .env.example .env                        # OPENAI_API_KEY / OPENAI_BASE_URL /
 .venv/bin/python -m pytest tests/test_pipeline.py::test_rerank_reorders_head_and_keeps_tail -q   # single test
 .venv/bin/python -m compileall -q app.py pages src run_experiments.py run_rag_evaluation.py
 
+# Indexing and benchmark CLI (see README "Build the benchmark")
+.venv/bin/python -m src.cli index build --input DIR --course CS101 [--strategy fixed] [--no-prefix] [--tokenizers whitespace,pyvi]
+.venv/bin/python -m src.cli index add-tokenizer --index DIR --tokenizer vncorenlp
+.venv/bin/python -m src.cli bench {generate|review-export|review-import|pool|agreement|split|describe|remap} ...
+
 # Experiments / RAG evaluation
 .venv/bin/python run_experiments.py --config configs/generated_experiment.yaml [--dry-run | --resume RUN_ID]
 .venv/bin/python run_rag_evaluation.py --config configs/generated_experiment.yaml
@@ -42,6 +47,8 @@ Tests are behavior-level, one file per module. They never download models or cal
 4. `index.py`: `RetrievalIndex` stores embeddings (numpy exact, or FAISS `IndexFlatIP`) plus one BM25 token file per tokenizer (`add_tokenizer` adds more without re-embedding). BM25 uses `k1=1.5`, `b=0.75`.
 5. `pipeline.py`: `RetrievalPipeline.run(query, PipelineConfig)`: sparse/dense top-L → fusion (`none | rrf | weighted | adaptive`, and `alpha` weights **BM25**) → rerank top-N → the full ordered list. Each `RetrievedChunk` carries `StageScores` (sparse/dense score and rank, fusion score, rerank score, rank), and the result carries `timings_ms`. An optional SQLite `RetrievalCache` stores first-stage lists and rerank scores.
 6. `rag.py`: `answer_question(query, pipeline, config, client, model)` → top `context_k` → refusal below `refusal_threshold` → LLM (uses `config.temperature`/`timeout_seconds`) → `_valid_citations`.
+
+**Benchmark** (`src/bench/`): pure functions over `list[dict]`. File I/O goes through `src/io_utils.py`, and CSVs are written as `utf-8-sig` so Excel opens them correctly. Order: `generate → review → pool → agreement → split → describe`. `bench/manifest.check_test_lock` records a sha256 of `frozen_params.yaml` at the first test run and flags later changes (it warns, never blocks). `src/cli.py` is the single argparse entry point.
 
 **State**: `storage.Database` is a thin sqlite3 wrapper (`data/app.db`). Most tables store a JSON payload column. Exactly one `corpus_versions` row is `active`, and Chat loads the index for that version. Named `PipelineConfig`s saved from the RAG Settings page are what Chat uses; `load_pipeline_configs` skips legacy/invalid rows and reports their names. Users are seeded from `.env` on startup with scrypt hashes, and existing users are never overwritten.
 
