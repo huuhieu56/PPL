@@ -20,16 +20,17 @@ cp .env.example .env                        # OPENAI_API_KEY / OPENAI_BASE_URL /
 # Verification (the project's full check)
 .venv/bin/python -m pytest -q                                   # Windows: .venv/Scripts/python -m pytest -q
 .venv/bin/python -m pytest tests/test_pipeline.py::test_rerank_reorders_head_and_keeps_tail -q   # single test
-.venv/bin/python -m compileall -q app.py pages src run_experiments.py run_rag_evaluation.py
+.venv/bin/python -m src.cli eval run --config configs/experiment.example.yaml --split test --dry-run
+.venv/bin/python -m compileall -q app.py pages src run_rag_evaluation.py
 
 # Indexing and benchmark CLI (see README "Build the benchmark")
 .venv/bin/python -m src.cli index build --input DIR --course CS101 [--strategy fixed] [--no-prefix] [--tokenizers whitespace,pyvi]
 .venv/bin/python -m src.cli index add-tokenizer --index DIR --tokenizer vncorenlp
 .venv/bin/python -m src.cli bench {generate|review-export|review-import|pool|agreement|split|describe|remap} ...
 
-# Experiments / RAG evaluation
-.venv/bin/python run_experiments.py --config configs/generated_experiment.yaml [--dry-run | --resume RUN_ID]
-.venv/bin/python run_rag_evaluation.py --config configs/generated_experiment.yaml
+# Evaluation / RAG answer scoring (see README "Run experiments")
+.venv/bin/python -m src.cli eval {tune|run|compare|errors|report} --config configs/experiment.yaml ...
+.venv/bin/python run_rag_evaluation.py --config configs/experiment.yaml
 .venv/bin/python run_rag_evaluation.py --summarize runs/RAG_RUN/rag_answers_blinded.csv
 ```
 
@@ -37,7 +38,7 @@ Tests are behavior-level, one file per module. They never download models or cal
 
 ## Architecture
 
-**Entry points**: `app.py` (login) plus Streamlit multipage `pages/` (Chat for student/admin; Documents, RAG Settings, and Experiments for admin only, gated by `src.ui.require_role`). There are also two CLI scripts, `run_experiments.py` and `run_rag_evaluation.py`. Paths resolve from the CWD (pages read `configs/*.yaml` relatively), so run everything from the repo root. `PPL_DATA_DIR`/`PPL_RUNS_DIR` override the `data/` and `runs/` locations.
+**Entry points**: `app.py` (login) plus Streamlit multipage `pages/` (Chat for student/admin; Documents, RAG Settings, and Experiments for admin only, gated by `src.ui.require_role`). `src/cli.py` is the single argparse entry point (`index`, `bench`, `eval` command groups); `run_rag_evaluation.py` is a separate CLI script for blinded LLM-answer scoring. Paths resolve from the CWD (pages read `configs/*.yaml` relatively), so run everything from the repo root. `PPL_DATA_DIR`/`PPL_RUNS_DIR` override the `data/` and `runs/` locations.
 
 **Pipeline** (`src/`):
 1. `text.py`: `normalize_text` (NFC, strips zero-width/control chars, joins hyphenated line breaks) and `tokenize(text, mode)` with `whitespace | pyvi | vncorenlp`. Documents and queries both go through it.
@@ -52,14 +53,14 @@ Tests are behavior-level, one file per module. They never download models or cal
 
 **State**: `storage.Database` is a thin sqlite3 wrapper (`data/app.db`). Most tables store a JSON payload column. Exactly one `corpus_versions` row is `active`, and Chat loads the index for that version. Named `PipelineConfig`s saved from the RAG Settings page are what Chat uses; `load_pipeline_configs` skips legacy/invalid rows and reports their names. Users are seeded from `.env` on startup with scrypt hashes, and existing users are never overwritten.
 
-**Experiments**: `configs/experiments.yaml` is the template. The Experiments page fills in the active corpus/index and uploaded benchmark files, then writes `configs/generated_experiment.yaml` (gitignored). Experiment IDs are restricted to `E0`–`E7`. `run_experiment` writes `runs/<timestamp>-<confighash>/` with `config.json`, `status.json`, an append-only `checkpoint.jsonl` (resume skips completed `(experiment_id, query_id)` pairs), `metrics.json`, `per_query.csv`, and `errors.csv`. Metrics live in `evaluation.py` (MRR@10, hit/precision/recall/nDCG@k with graded 0/1/2 qrels, paired bootstrap CI). Benchmark JSONL schemas are in README.md.
+**Evaluation** (`src/eval/`): `spec.load_spec` reads the experiment YAML (`configs/experiment.yaml`; `${DATA_DIR}`/`${RUNS_DIR}` placeholders), resolving each config's `frozen` values (`alpha`, `rrf_k`, `adaptive_beta`, `rerank_n`) from `<bench_dir>/frozen_params.yaml` — `eval run --split test` refuses to run until that file exists. `runner.run_evaluation` checkpoints per-query results to `per_query.jsonl` (per-stage scores, see `RESULT_FIELDS`), supports `--resume`/`--only`, calls `bench/manifest.check_test_lock` on the test split (records `config.json`'s `lock.lock_violation`, never blocks), remaps qrels for configs pointing at a different index, and measures latency without the retrieval cache. `tune.tune` grid-searches on the dev split and writes `frozen_params.yaml`. `compare.compare_run` runs paired bootstrap CI + Holm-corrected randomization tests per `comparisons` family. `errors.classify_failures` labels failed queries by pipeline stage (`first_stage_miss | fusion_demoted | rerank_demoted`) and exports a sample for manual `cause` labeling. `report.build_report` writes Chapter 3 tables/figures to `runs/<RUN_ID>/report/`; the table/figure numbering lives in `report.TABLES`/`report.FIGURES` and must match `b_o_c_o_nh_m_3.md` (checked by `tests/test_notebook.py`). The Experiments page (`pages/4_Experiments.py`) lists runs, shows the generated tables/figures, and warns on `lock_violation`.
 
 ## Gotchas
 
 - BM25 fixtures in tests need at least 4 chunks, with each query term in only one chunk. `rank_bm25` gives idf ≤ 0 to a term that appears in at least half of the documents.
 - `PipelineConfig` validates strictly: any fusion other than `none` needs both branches, and it requires `context_k ≤ rerank_n ≤ top_l`. RAG configs saved to the DB in the old format are skipped.
-- `src/experiments.py` + `run_experiments.py` are a temporary bridge (legacy E0–E7 YAML mapped onto `PipelineConfig`) until `src/eval/` replaces them.
 - python-pptx returns fresh shape proxies, so compare shapes by `shape_id`, never with `is`.
 - Windows console is cp1252; set `PYTHONIOENCODING=utf-8` when printing Vietnamese.
 - Research protocol from README: don't look at test-split results until tokenizer, chunking, models, fusion params, and thresholds are locked using train/dev.
-- `data/raw`, `data/processed`, `data/indexes`, `runs/`, `*.db`, `.env`, and `*.docx` are gitignored. `configs/example_experiments.yaml` points at `examples/index`, which is not a real index and only works with `--dry-run`.
+- `data/raw`, `data/processed`, `data/indexes`, `runs/`, `*.db`, `.env`, and `*.docx` are gitignored. `configs/experiment.example.yaml` points at `examples/index`, which is not a real index and only works with `--dry-run`.
+- On Colab, install from `requirements.in`, not `requirements.txt` (which pins the CPU-only torch build via `--torch-backend cpu`).

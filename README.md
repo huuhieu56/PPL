@@ -81,34 +81,27 @@ File formats:
 
 Annotators fill `relevance` (0 = irrelevant, 1 = supporting, 2 = direct answer) and, when relevance ≥ 1, `evidence_quote` (a verbatim excerpt from the chunk). Have both annotators label at least 30% of the questions so κ is meaningful. Queries with no relevant chunk are dropped at `split`.
 
-## Run retrieval experiments
+## Run experiments
 
-The Streamlit **Experiments** page creates `configs/generated_experiment.yaml` and displays the command. Validate before loading models:
+`configs/experiment.yaml` is the experiment spec (matrix C1–C4, X1–X6; see "Build the benchmark" above for `bench_dir`). Tune on dev before ever touching test:
 
 ```bash
-.venv/bin/python run_experiments.py --config configs/generated_experiment.yaml --dry-run
+.venv/bin/python -m src.cli eval run --config configs/experiment.yaml --split test --dry-run   # validate configs/index without loading models
+.venv/bin/python -m src.cli eval tune --config configs/experiment.yaml                          # writes <bench_dir>/frozen_params.yaml from the dev split
+.venv/bin/python -m src.cli eval run --config configs/experiment.yaml --split test              # locks frozen_params.yaml on first test run
+.venv/bin/python -m src.cli eval compare --config configs/experiment.yaml --run RUN_DIR          # paired bootstrap CI + Holm-corrected randomization test
+.venv/bin/python -m src.cli eval errors --config configs/experiment.yaml --run RUN_DIR           # error_sample.csv; label its `cause` column, then rerun with --summarize error_sample.csv
+.venv/bin/python -m src.cli eval report --config configs/experiment.yaml --run RUN_DIR           # Chapter 3 tables/figures
 ```
 
-Run E0–E7:
+`eval run --split test` refuses to run until `eval tune` has written `frozen_params.yaml`. Changing `frozen_params.yaml` after the first test run does not block later runs, but marks `config.json`'s `lock.lock_violation` and is flagged on the Streamlit **Experiments** page. `--resume RUN_ID` continues an interrupted run without repeating completed queries; `--only C1,C2` restricts which configs run.
+
+Each run writes to `runs/<RUN_ID>/`: `config.json`, `per_query.jsonl` (per-stage scores), `metrics.json`, `metrics_per_query.csv`, `latency.json`, `comparisons.csv`, `error_sample.csv`, and `report/table_3_*.md` / `report/figure_3_*.png` (numbered to match Chapter 3 of `b_o_c_o_nh_m_3.md`).
+
+`run_rag_evaluation.py --config configs/experiment.yaml` still works for blinded LLM-answer scoring (Dense, fixed Hybrid, Adaptive Hybrid + Reranker) on the test split:
 
 ```bash
-.venv/bin/python run_experiments.py --config configs/generated_experiment.yaml
-```
-
-Resume an interrupted run:
-
-```bash
-.venv/bin/python run_experiments.py --config configs/generated_experiment.yaml --resume RUN_ID
-```
-
-Every run writes frozen config, checkpoint, status, `metrics.json`, `per_query.csv`, and `errors.csv` under `runs/RUN_ID/`. Do not inspect test-set results until tokenizer, chunking, models, fusion parameters, thresholds, and primary comparisons have been locked using train/dev.
-
-## Evaluate RAG answers
-
-Use the same index/query configuration to produce blinded outputs for Dense, fixed Hybrid, and Adaptive Hybrid + Reranker:
-
-```bash
-.venv/bin/python run_rag_evaluation.py --config configs/generated_experiment.yaml
+.venv/bin/python run_rag_evaluation.py --config configs/experiment.yaml
 ```
 
 Human raters fill the empty scoring columns in `rag_answers_blinded.csv`. Keep `rag_answers_key.json` hidden until scoring finishes, then summarize without another API call:
@@ -117,13 +110,18 @@ Human raters fill the empty scoring columns in `rag_answers_blinded.csv`. Keep `
 .venv/bin/python run_rag_evaluation.py --summarize runs/RAG_RUN/rag_answers_blinded.csv
 ```
 
+## Google Colab
+
+Open `notebooks/colab_pipeline.ipynb` in Colab and run the cells in order. Set `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL` as Colab Secrets. Data and runs persist on Google Drive via `PPL_DATA_DIR`/`PPL_RUNS_DIR`. Install from `requirements.in` (not `requirements.txt`, which pins the CPU-only torch build).
+
 ## Verification
 
 ```bash
 .venv/bin/python -m pytest -q
-.venv/bin/python -m compileall -q app.py pages src run_experiments.py run_rag_evaluation.py
+.venv/bin/python -m src.cli eval run --config configs/experiment.example.yaml --split test --dry-run
+.venv/bin/python -m compileall -q app.py pages src run_rag_evaluation.py
 ```
 
 Tests use fake encoders (`tests/fakes.py`) and never download models.
 
-The example experiment config validates structure only; its index directory is not a real searchable index.
+The example experiment config (`configs/experiment.example.yaml`, pointing at `examples/index`) validates structure only; its index directory is not a real searchable index.

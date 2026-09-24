@@ -57,6 +57,19 @@
     * 2.7.5. Tối ưu hiệu năng
     * 2.7.6. Khả năng mở rộng và bảo trì
   * 2.8. Kết luận chương
+* CHƯƠNG 3: THỰC NGHIỆM VÀ ĐÁNH GIÁ KẾT QUẢ
+  * 3.1. Môi trường và thiết lập thực nghiệm
+  * 3.2. Bộ dữ liệu và benchmark
+  * 3.3. Tinh chỉnh siêu tham số trên tập dev
+  * 3.4. Kết quả trên tập test
+    * 3.4.1. RQ1 – So sánh BM25 và Dense Retrieval theo nhóm truy vấn
+    * 3.4.2. RQ2 – Hiệu quả của Hybrid Retrieval
+    * 3.4.3. RQ3 – Đóng góp và chi phí của Reranker
+    * 3.4.4. Phân tích độ nhạy theo nguồn câu hỏi
+  * 3.5. Phân tích lỗi
+  * 3.6. Các hướng khai thác mở rộng
+  * 3.7. Thảo luận và các yếu tố ảnh hưởng tính hợp lệ
+  * 3.8. Kết luận chương
 * DANH MỤC TÀI LIỆU THAM KHẢO
 
 ---
@@ -86,6 +99,17 @@
 * **Bảng 1.1.** Tổng hợp so sánh các công trình nghiên cứu liên quan
 * **Bảng 2.1.** Cấu trúc trường dữ liệu của thực thể chunk tài liệu
 * **Bảng 2.2.** Ma trận cấu hình thực nghiệm C1–C4
+* **Bảng 3.1.** Môi trường và thiết lập thực nghiệm
+* **Bảng 3.2.** Thống kê bộ benchmark theo nhóm, nguồn và tập
+* **Bảng 3.3.** Độ đồng thuận dán nhãn và đóng góp của từng hệ thống vào pool
+* **Bảng 3.4.** Tham số tối ưu chọn trên tập dev
+* **Bảng 3.5.** Kết quả tổng thể trên tập test
+* **Bảng 3.6.** Kết quả theo nhóm truy vấn trên tập test (RQ1)
+* **Bảng 3.7.** So sánh ghép cặp có kiểm định thống kê (RQ2, RQ3, X2)
+* **Bảng 3.8.** Độ trễ theo tầng xử lý (ms)
+* **Bảng 3.9.** Kết quả theo nguồn câu hỏi (phân tích độ nhạy)
+* **Bảng 3.10.** Phân bố truy vấn thất bại theo tầng và nguyên nhân
+* **Bảng 3.11.** Kết quả các hướng khai thác X3–X6
 
 ---
 
@@ -96,6 +120,9 @@
 * **Hình 1.4.** Cơ chế hoạt động của Dense Retrieval
 * **Hình 1.5.** Phân loại các họ phương pháp truy xuất thông tin
 * **Hình 1.6.** Kiến trúc truy xuất hai tầng kết hợp Cross-Encoder Reranker
+* **Hình 3.1.** Ảnh hưởng của α đến chỉ số chính trên tập dev
+* **Hình 3.2.** Đánh đổi chất lượng – độ trễ theo số ứng viên rerank N
+* **Hình 3.3.** Chỉ số chính theo nhóm truy vấn trên tập test
 
 ---
 
@@ -428,6 +455,8 @@ Tập ứng viên Top-N (N = 25–50) sau bước Hybrid được đưa vào mô
 | **C3** | BM25 + Dense | RRF / Weighted Sum | Không | Đo lường hiệu quả dung hợp |
 | **C4** | BM25 + Dense | RRF / Weighted Sum | Cross-Encoder | Đóng góp của Reranker |
 
+*Ghi chú:* C3 và C4 được triển khai thành hai biến thể theo cơ chế dung hợp: C3-RRF/C3-WS và C4-RRF/C4-WS. Ngoài ra, cấu hình đối chứng X1 (Dense + Reranker) được bổ sung để tách riêng đóng góp của Reranker khỏi đóng góp của bước dung hợp (xem mục 3.6).
+
 ## 2.6. Thiết kế thực nghiệm và phương pháp đánh giá
 
 ### 2.6.1. Quy trình thực nghiệm chuẩn tắc
@@ -476,6 +505,168 @@ Trong Chương 2, đề tài đã hoàn thành phân tích toàn diện yêu c�
 Về dữ liệu, đề tài đã xây dựng quy trình tiền xử lý, chuẩn hóa Unicode NFC và phân đoạn thông minh Structure-aware Chunking có bảo tồn ngữ cảnh tiêu đề. Về phương pháp luận, ma trận thực nghiệm bốn cấu hình C1–C4 cùng hệ thống chỉ số đánh giá chuẩn mực (Hit Rate@K, MRR, NDCG@K) đã được định hình rõ ràng, kèm theo các biện pháp kiểm soát rủi ro sai lệch thực nghiệm như chống thiên vị pooling và phân tách Dev/Test Set.
 
 Toàn bộ thiết kế hệ thống và cơ sở thực nghiệm này tạo tiền đề khoa học vững chắc để triển khai các kịch bản kiểm thử, so sánh số liệu thực nghiệm định lượng và phân tích kết quả chuyên sâu trong chương tiếp theo.
+
+---
+
+# CHƯƠNG 3: THỰC NGHIỆM VÀ ĐÁNH GIÁ KẾT QUẢ
+
+Chương này trình bày quá trình triển khai thực nghiệm theo quy trình chuẩn tắc đã thiết kế ở mục 2.6: mô tả môi trường và bộ dữ liệu, tinh chỉnh siêu tham số trên tập dev, đánh giá chính thức các cấu hình C1–C4 trên tập test để trả lời ba câu hỏi nghiên cứu RQ1–RQ3, phân tích lỗi, và trình bày các hướng khai thác mở rộng X1–X6. Toàn bộ số liệu trong chương được sinh tự động bởi công cụ `python -m src.cli eval …`; mỗi bảng/hình ghi rõ tệp nguồn để bảo đảm khả năng tái lập.
+
+## 3.1. Môi trường và thiết lập thực nghiệm
+
+Thực nghiệm được thực hiện trên [[ĐIỀN: nền tảng và GPU, ví dụ Google Colab Pro – GPU … — nguồn: runs/<RUN_ID>/latency.json, mục hardware]]. Các thành phần được cố định như sau: mô hình embedding BAAI/bge-m3 (1024 chiều, chuẩn hóa L2, tìm kiếm chính xác bằng tích vô hướng), mô hình reranker BAAI/bge-reranker-v2-m3, BM25 với k1 = 1,5 và b = 0,75, mỗi nhánh truy xuất trả về top-L = 100 ứng viên, số chunk đưa vào ngữ cảnh K = 5, seed = 42. Kho tài liệu được phân đoạn theo cấu trúc (structure-aware) với tối đa 350 từ mỗi chunk, chồng lấn 50 từ, và gắn tiền tố `[Tài liệu] > [Chương] > [Mục]`.
+
+**Bảng 3.1. Môi trường và thiết lập thực nghiệm**
+
+[[ĐIỀN: dán bảng — nguồn: runs/<RUN_ID>/report/table_3_1.md (lệnh `python -m src.cli eval report`)]]
+
+## 3.2. Bộ dữ liệu và benchmark
+
+### 3.2.1. Kho tài liệu học tập
+
+Kho tài liệu gồm [[ĐIỀN: số tài liệu, loại (giáo trình/slide/đề thi), môn học, tổng số trang — nguồn: trang Documents / data/processed/<version>/manifest.json]], sau phân đoạn thu được [[ĐIỀN: số chunk — nguồn: data/indexes/<version>/index_meta.json]] chunk.
+
+### 3.2.2. Xây dựng tập truy vấn
+
+Tập truy vấn được xây dựng theo hai nguồn. (1) Câu hỏi nháp do mô hình ngôn ngữ [[ĐIỀN: tên mô hình LLM — nguồn: data/benchmark/drafts.jsonl, trường generator]] sinh từ các chunk được lấy mẫu phân tầng theo môn học, loại tài liệu và tài liệu, với câu lệnh riêng cho bốn nhóm truy vấn (mục 2.2.2). Mỗi câu hỏi nháp phải vượt qua kiểm tra tự động: nhóm định danh phải chứa mã/ký hiệu có trong chunk; nhóm diễn đạt lại phải có độ trùng từ vựng (Jaccard trên từ nội dung) với chunk nguồn không quá 0,2; đoạn trích căn cứ phải xuất hiện nguyên văn trong chunk. Sau đó thành viên nhóm rà soát từng câu (giữ/sửa/loại). (2) Câu hỏi do người viết trực tiếp mà không nhìn tài liệu, nhằm mô phỏng câu hỏi thực của người học và giảm thiên lệch từ vựng của câu hỏi sinh tự động. Các câu gần trùng lặp (cosine ≥ 0,92) được loại bỏ. Tập cuối cùng gồm [[ĐIỀN: tổng số câu hỏi, số câu mỗi nhóm, tỉ lệ câu do người viết — nguồn: data/benchmark/benchmark_description.json]].
+
+**Bảng 3.2. Thống kê bộ benchmark theo nhóm, nguồn và tập**
+
+[[ĐIỀN: dán bảng — nguồn: runs/<RUN_ID>/report/table_3_2.md]]
+
+### 3.2.3. Gán nhãn mức độ liên quan và độ tin cậy
+
+Để chống thiên vị pooling (mục 2.4.3), với mỗi câu hỏi, tập ứng viên được hợp nhất từ top-15 của sáu hệ thống (C1, C2, C3-RRF, C3-WS, C4-WS, X1), chunk nguồn và các chunk do người dán nhãn tự tìm thêm. Tệp dán nhãn được xáo trộn và ẩn tên hệ thống. Hai người dán nhãn độc lập theo thang 0/1/2 trên [[ĐIỀN: số cặp/tỉ lệ câu hỏi được dán nhãn đôi — nguồn: data/benchmark/agreement.json]]; độ đồng thuận Cohen's κ có trọng số bậc hai đạt [[ĐIỀN: κ — nguồn: data/benchmark/agreement.json]], [[ĐIỀN: diễn giải theo thang Landis–Koch]]. Các trường hợp bất đồng được cả nhóm thống nhất lần cuối. Mỗi nhãn liên quan kèm đoạn trích căn cứ, cho phép ánh xạ nhãn sang các cách phân đoạn khác (mục 3.6.4).
+
+**Bảng 3.3. Độ đồng thuận dán nhãn và đóng góp của từng hệ thống vào pool**
+
+[[ĐIỀN: dán bảng — nguồn: runs/<RUN_ID>/report/table_3_3.md]]
+
+[[ĐIỀN: nhận xét về số chunk liên quan chỉ một hệ thống tìm thấy — bằng chứng pooling đa nguồn là cần thiết]]
+
+### 3.2.4. Phân tách dev/test
+
+Tập câu hỏi được chia phân tầng theo nhóm truy vấn thành dev (30%) và test (70%) với seed 42; câu hỏi không có chunk liên quan bị loại ([[ĐIỀN: số câu bị loại — nguồn: kết quả lệnh `bench split`]]). Mã băm của tệp truy vấn, qrels và tham số tối ưu được ghi vào `benchmark_manifest.json`; công cụ đánh giá ghi nhận mọi thay đổi tham số sau lần chạy test đầu tiên (trạng thái khóa: [[ĐIỀN: có/không vi phạm — nguồn: runs/<RUN_ID>/config.json, trường lock]]).
+
+## 3.3. Tinh chỉnh siêu tham số trên tập dev
+
+Chỉ số chính MRR@10 được khai báo trước khi thực nghiệm. Trên tập dev, hệ thống quét α ∈ {0; 0,1; …; 1} cho Weighted Sum, k ∈ {10, 20, 40, 60, 100} cho RRF, β ∈ {0,1; 0,2; 0,3; 0,5} cho dung hợp thích nghi và N ∈ {10, 20, 30, 50} cho reranker; khi hòa điểm, giá trị gần mặc định được chọn.
+
+**Bảng 3.4. Tham số tối ưu chọn trên tập dev**
+
+[[ĐIỀN: dán bảng — nguồn: runs/<RUN_ID>/report/table_3_4.md hoặc data/benchmark/frozen_params.yaml]]
+
+**Hình 3.1. Ảnh hưởng của α đến chỉ số chính trên tập dev**
+
+[[ĐIỀN: chèn hình — nguồn: runs/<RUN_ID>/report/figure_3_1.png]]
+
+[[ĐIỀN: nhận xét — α tối ưu có khác nhau giữa các nhóm truy vấn không (ví dụ nhóm định danh ưa α cao, nhóm diễn đạt lại ưa α thấp)? Đây là căn cứ cho hướng X2]]
+
+## 3.4. Kết quả trên tập test
+
+**Bảng 3.5. Kết quả tổng thể trên tập test**
+
+[[ĐIỀN: dán bảng — nguồn: runs/<RUN_ID>/report/table_3_5.md]]
+
+### 3.4.1. RQ1 – So sánh BM25 và Dense Retrieval theo nhóm truy vấn
+
+**Bảng 3.6. Kết quả theo nhóm truy vấn trên tập test (RQ1)**
+
+[[ĐIỀN: dán bảng — nguồn: runs/<RUN_ID>/report/table_3_6.md]]
+
+**Hình 3.3. Chỉ số chính theo nhóm truy vấn trên tập test**
+
+[[ĐIỀN: chèn hình — nguồn: runs/<RUN_ID>/report/figure_3_3.png]]
+
+[[ĐIỀN: kết luận giả thuyết RQ1 — BM25 có vượt trội ở nhóm định danh và Dense ở nhóm khái niệm/diễn đạt lại không; nêu chênh lệch và khoảng tin cậy theo nhóm từ comparisons.csv]]
+
+### 3.4.2. RQ2 – Hiệu quả của Hybrid Retrieval
+
+**Bảng 3.7. So sánh ghép cặp có kiểm định thống kê (RQ2, RQ3, X2)**
+
+[[ĐIỀN: dán bảng — nguồn: runs/<RUN_ID>/report/table_3_7.md (lệnh `python -m src.cli eval compare` trước `eval report`)]]
+
+[[ĐIỀN: kết luận giả thuyết RQ2 — C3-RRF/C3-WS so với cấu hình đơn lẻ tốt nhất (chọn trên dev): chênh lệch MRR@10, CI 95% bootstrap, p đã hiệu chỉnh Holm]]
+
+### 3.4.3. RQ3 – Đóng góp và chi phí của Reranker
+
+**Bảng 3.8. Độ trễ theo tầng xử lý (ms)**
+
+[[ĐIỀN: dán bảng — nguồn: runs/<RUN_ID>/report/table_3_8.md]]
+
+**Hình 3.2. Đánh đổi chất lượng – độ trễ theo số ứng viên rerank N**
+
+[[ĐIỀN: chèn hình — nguồn: runs/<RUN_ID>/report/figure_3_2.png]]
+
+[[ĐIỀN: kết luận giả thuyết RQ3 — mức tăng MRR@10/NDCG@10 của C4 so với C3 và của X1 so với C2 (Bảng 3.7), đổi lại độ trễ tăng bao nhiêu ms (trung bình và P95)]]
+
+### 3.4.4. Phân tích độ nhạy theo nguồn câu hỏi
+
+**Bảng 3.9. Kết quả theo nguồn câu hỏi (phân tích độ nhạy)**
+
+[[ĐIỀN: dán bảng — nguồn: runs/<RUN_ID>/report/table_3_9.md]]
+
+[[ĐIỀN: thứ hạng các cấu hình có giữ nguyên giữa câu hỏi do LLM sinh và câu hỏi do người viết không? Nếu có, kết luận của RQ1–RQ3 vững hơn trước thiên lệch của câu hỏi sinh tự động]]
+
+## 3.5. Phân tích lỗi
+
+Với cấu hình mục tiêu C4-WS, các truy vấn không có chunk liên quan nào trong top-10 được phân loại tự động theo tầng gây lỗi dựa trên điểm phân rã (Bảng 2.1): (i) *first_stage_miss* – cả BM25 và Dense đều không đưa chunk đúng vào top-L; (ii) *fusion_demoted* – chunk đúng có trong top-L nhưng bị đẩy ra ngoài top-N sau dung hợp; (iii) *rerank_demoted* – chunk đúng có trong top-N nhưng bị Reranker hạ xuống ngoài top-10. Một mẫu tối đa 50 truy vấn thất bại được nhóm gắn nhãn nguyên nhân thủ công: lỗi trích xuất/OCR, chunk cắt ngang ý, tách từ, lệch từ vựng, cần suy luận nhiều bước, nhãn qrels sai, khác.
+
+**Bảng 3.10. Phân bố truy vấn thất bại theo tầng và nguyên nhân**
+
+[[ĐIỀN: dán bảng — nguồn: runs/<RUN_ID>/report/table_3_10.md (lệnh `eval errors`, gắn nhãn cột cause trong error_sample.csv, rồi `eval errors --summarize`)]]
+
+[[ĐIỀN: 2–3 ví dụ lỗi tiêu biểu kèm câu hỏi, chunk đúng, chunk xếp đầu và nguyên nhân]]
+
+## 3.6. Các hướng khai thác mở rộng
+
+Phần này trình bày các thí nghiệm bổ sung nhằm khai thác các khoảng trống nghiên cứu đã nêu ở mục 1.2.3, vượt ra ngoài ma trận C1–C4.
+
+### 3.6.1. X1 – Dense + Reranker: tách đóng góp của Reranker
+
+So sánh C4 với C2 gộp chung hai tác động (dung hợp và tái xếp hạng). Cấu hình X1 áp dụng Reranker trực tiếp lên Dense Retrieval, cho phép tách riêng: đóng góp của Reranker (X1 so với C2) và giá trị gia tăng của dung hợp khi đã có Reranker (C4 so với X1). [[ĐIỀN: kết quả — nguồn: Bảng 3.5 và Bảng 3.7]]
+
+### 3.6.2. X2 – Dung hợp thích nghi theo truy vấn
+
+Thay vì một α cố định, α được điều chỉnh theo đặc trưng từ vựng của truy vấn: α = clamp(α₀ + β·(2·s − 1), 0,1, 0,9), trong đó s ∈ [0, 1] tổng hợp tỉ lệ chữ số, tỉ lệ ký hiệu, sự hiện diện của mã định danh và IDF lớn nhất (chuẩn hóa) của các từ trong truy vấn. Truy vấn giàu định danh nhận α lớn (ưu tiên BM25), truy vấn ngữ nghĩa nhận α nhỏ (ưu tiên Dense). Hướng này trực tiếp giải quyết khoảng trống (2) về tối ưu hóa trọng số dung hợp. [[ĐIỀN: kết quả X2/X2-R so với C3-WS/C4-WS — nguồn: Bảng 3.7]]
+
+### 3.6.3. X3 – Ảnh hưởng của tách từ tiếng Việt đến BM25
+
+So sánh tách từ theo khoảng trắng (âm tiết) với tách từ ghép bằng pyvi và VnCoreNLP [26] cho C1 và C3-WS. [[ĐIỀN: kết quả — nguồn: Bảng 3.11]]
+
+### 3.6.4. X4 – Structure-aware chunking và tiền tố tiêu đề
+
+So sánh phân đoạn theo cấu trúc với phân đoạn cửa sổ cố định (450 từ, chồng lấn 75), và bật/tắt tiền tố `[Tài liệu] > [Chương] > [Mục]`. Nhãn qrels được ánh xạ tự động sang từng cách phân đoạn thông qua đoạn trích căn cứ, nên không cần dán nhãn lại. [[ĐIỀN: kết quả — nguồn: Bảng 3.11]]
+
+### 3.6.5. X5 – Số ứng viên đưa vào Reranker
+
+Quét N ∈ {10, 20, 30, 50} để xác định điểm cân bằng giữa chất lượng và độ trễ. [[ĐIỀN: kết quả — nguồn: Hình 3.2 và Bảng 3.11]]
+
+### 3.6.6. X6 – Độ nhạy theo mô hình embedding
+
+Thay BGE-M3 bằng [[ĐIỀN: tên mô hình embedding tiếng Việt được chọn]] cho C2 và C4-WS để kiểm tra kết luận có phụ thuộc vào mô hình embedding hay không. [[ĐIỀN: kết quả — nguồn: Bảng 3.11]]
+
+**Bảng 3.11. Kết quả các hướng khai thác X3–X6**
+
+[[ĐIỀN: dán bảng — nguồn: runs/<RUN_ID>/report/table_3_11.md]]
+
+## 3.7. Thảo luận và các yếu tố ảnh hưởng tính hợp lệ
+
+### 3.7.1. Thảo luận
+
+[[ĐIỀN: tổng hợp câu trả lời RQ1–RQ3, đối chiếu với các công trình ở Bảng 1.1 (Strich và cộng sự, 2026; Lyu và cộng sự, 2024; Lian, 2026), và đề xuất cấu hình tối ưu cho học liệu tiếng Việt (nhiệm vụ 5, mục 1.3.2)]]
+
+### 3.7.2. Các yếu tố ảnh hưởng tính hợp lệ
+
+* **Nguồn câu hỏi:** phần lớn câu hỏi được sinh bởi LLM từ chính các chunk nên có thể thiên về khớp từ vựng; ảnh hưởng này được kiểm tra bằng phân tích độ nhạy theo nguồn câu hỏi (Bảng 3.9) và kiểm tra độ trùng từ vựng với nhóm diễn đạt lại.
+* **Cỡ mẫu theo nhóm:** mỗi nhóm truy vấn trên tập test có khoảng [[ĐIỀN: số câu mỗi nhóm]] câu, nên khoảng tin cậy theo nhóm rộng; kết luận theo nhóm chỉ mang tính định hướng.
+* **Độ sâu pooling:** chunk liên quan nằm ngoài top-15 của mọi hệ thống và không được tìm thủ công sẽ không có nhãn, có thể làm giảm Recall tuyệt đối (nhưng tác động như nhau lên các cấu hình).
+* **Phạm vi dữ liệu:** thực nghiệm trên [[ĐIỀN: số môn học]] môn học của một cơ sở đào tạo; khả năng khái quát sang môn học/cơ sở khác cần được kiểm chứng.
+* **Phần cứng:** độ trễ đo trên GPU của Colab có biến động giữa các phiên; số liệu độ trễ dùng để so sánh tương đối giữa các cấu hình trong cùng một lần chạy.
+
+## 3.8. Kết luận chương
+
+[[ĐIỀN: tóm tắt kết quả chính của RQ1–RQ3, cấu hình khuyến nghị, đóng góp của các hướng khai thác X1–X6 và hạn chế còn lại]]
 
 ---
 

@@ -9,11 +9,15 @@ from pathlib import Path
 
 from openai import OpenAI
 
-from src.config import load_settings, load_yaml
+from src.config import load_settings
+from src.eval.runner import load_benchmark
+from src.eval.spec import load_spec
 from src.index import RetrievalIndex
+from src.indexing import resolve_index_dir
 from src.models import PipelineConfig
 from src.pipeline import RetrievalPipeline
 from src.rag import answer_question
+from src.storage import Database
 
 
 SYSTEMS = {
@@ -24,20 +28,18 @@ SYSTEMS = {
 SCORE_COLUMNS = ("correctness_1_5", "faithfulness_1_5", "citation_correct_0_1")
 
 
-def _jsonl(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
-
-
 def generate(config_path: Path) -> Path:
-    config = load_yaml(config_path)
     settings = load_settings()
     if not settings.openai_api_key or not settings.openai_model:
         raise ValueError("OPENAI_API_KEY and OPENAI_MODEL are required")
-    pipeline = RetrievalPipeline(RetrievalIndex.load(config["index_dir"]))
-    queries = _jsonl(Path(config["queries"]))
-    seed = int(config.get("seed", 42))
+    spec = load_spec(config_path, settings)
+    database = Database(settings.db_path)
+    database.initialize()
+    pipeline = RetrievalPipeline(RetrievalIndex.load(spec.index_dir or resolve_index_dir(None, settings, database)))
+    queries, _, _ = load_benchmark(spec.bench_dir, "test")
+    seed = spec.seed
     rng = random.Random(seed)
-    output_dir = Path(config.get("runs_dir", settings.runs_dir)) / (
+    output_dir = spec.runs_dir / (
         "rag-eval-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     )
     output_dir.mkdir(parents=True)
