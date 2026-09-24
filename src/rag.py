@@ -23,8 +23,8 @@ class RagAnswer:
 
 def _prompt(query: str, results) -> list[dict]:
     context = "\n\n".join(
-        f"[{number}] Tài liệu: {result.chunk.doc_id}; trang/slide: {result.chunk.page}; "
-        f"mục: {result.chunk.section}\n{result.chunk.text}"
+        f"[{number}] Nguồn: {result.chunk.breadcrumb()}; trang/slide: {result.chunk.page}\n"
+        f"{result.chunk.body}"
         for number, result in enumerate(results, start=1)
     )
     return [
@@ -58,9 +58,10 @@ def _valid_citations(text: str, results) -> tuple[str, list[dict]]:
                     "number": number,
                     "chunk_id": result.chunk.chunk_id,
                     "doc_id": result.chunk.doc_id,
+                    "doc_title": result.chunk.doc_title,
+                    "heading_path": list(result.chunk.heading_path),
                     "page": result.chunk.page,
-                    "section": result.chunk.section,
-                    "text": result.chunk.text,
+                    "text": result.chunk.body,
                 }
             )
         return match.group(0)

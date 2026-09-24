@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 from rank_bm25 import BM25Okapi
 
-from src.ingestion import tokenize_vi
+from src.text import tokenize as tokenize_vi
 from src.models import Chunk, RagConfig, SearchResult
 
 

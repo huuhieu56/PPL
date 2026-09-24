@@ -1,8 +1,8 @@
 import hashlib
 import re
-from types import SimpleNamespace
-
 import numpy as np
+
+from src.models import Chunk
 
 
 class FakeEncoder:
@@ -38,4 +38,14 @@ class FakeCrossEncoder:
 
 
 def make_chunk(chunk_id, text, **fields):
-    return SimpleNamespace(chunk_id=chunk_id, text=text, **fields)
+    values = {
+        "doc_id": "doc-1",
+        "doc_title": "Tài liệu",
+        "course": "AI101",
+        "source_type": "slide",
+        "page": 1,
+        "heading_path": (),
+        "body": text,
+        **fields,
+    }
+    return Chunk(chunk_id=chunk_id, text=text, **values)

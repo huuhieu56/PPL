@@ -11,14 +11,25 @@ FUSIONS = ("none", "rrf", "weighted", "adaptive")
 class Chunk:
     chunk_id: str
     doc_id: str
+    doc_title: str
     course: str
     source_type: str
     page: int
-    section: str
+    heading_path: tuple[str, ...]
+    body: str
     text: str
 
+    def breadcrumb(self) -> str:
+        return " > ".join(part for part in (self.doc_title, *self.heading_path) if part)
+
     def to_dict(self) -> dict:
-        return asdict(self)
+        data = asdict(self)
+        data["heading_path"] = list(self.heading_path)
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Chunk":
+        return cls(**{**data, "heading_path": tuple(data.get("heading_path", ()))})
 
 
 @dataclass(frozen=True)
