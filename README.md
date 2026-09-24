@@ -13,9 +13,12 @@ Local Streamlit application for grounded question answering over Vietnamese lear
 
 ```bash
 uv venv --python 3.11 .venv
-uv pip install --python .venv/bin/python -r requirements.txt --torch-backend cpu
+uv pip install --python .venv/bin/python -r requirements.txt --torch-backend cpu      # Linux/macOS
+uv pip install --python .venv/Scripts/python.exe -r requirements.txt --torch-backend cpu # Windows
 cp .env.example .env
 ```
+
+VnCoreNLP (optional tokenizer) needs Java 8+; its model downloads to `vncorenlp/` or `PPL_VNCORENLP_DIR`.
 
 Set these values in `.env`:
 
@@ -31,6 +34,14 @@ STUDENT_PASSWORD=change-this-password
 
 `.env`, uploaded documents, indexes, SQLite databases, and experiment outputs are ignored by Git.
 
+## Data locations
+
+- `PPL_DATA_DIR` (default `data/`) holds uploads, processed corpora, indexes, `app.db`, and the retrieval cache (`cache/retrieval.sqlite`).
+- `PPL_RUNS_DIR` (default `runs/`) holds experiment runs.
+- An index lives in `data/indexes/<version>/`: `chunks.jsonl`, `embeddings.npy`, `tokens_<tokenizer>.json`, `index_meta.json`, and optionally `faiss.index`.
+
+**Indexes built before the structure-aware pipeline are not compatible — rebuild them from the Documents page.**
+
 ## Run the application
 
 ```bash
@@ -38,11 +49,11 @@ STUDENT_PASSWORD=change-this-password
 ```
 
 1. Sign in as administrator.
-2. Open **Documents**, upload PDF/DOCX/PPTX, preview extraction, then build and activate the index.
-3. Open **RAG Settings** and save a named configuration.
+2. Open **Documents**, upload PDF/DOCX/PPTX, choose the chunking strategy (default: structure-aware with `Document > Chapter > Section` prefix), preview extraction, then build and activate the index.
+3. Open **RAG Settings**, choose BM25/Dense/Hybrid, the fusion method and the reranker, and save a named configuration.
 4. Sign in as student or remain admin, then use **Chat**.
 
-The first index build downloads `BAAI/bge-m3`. Enabling reranking downloads `BAAI/bge-reranker-v2-m3`. On CPU, the interactive default reranks 20 candidates.
+The first index build downloads `BAAI/bge-m3`. Enabling reranking downloads `BAAI/bge-reranker-v2-m3`. The default reranks the top 30 fused candidates.
 
 ## Benchmark schema
 
@@ -98,14 +109,11 @@ Human raters fill the empty scoring columns in `rag_answers_blinded.csv`. Keep `
 
 ## Verification
 
-The project intentionally has four behavior-level tests rather than tests generated per function:
-
 ```bash
-.venv/bin/python -m pytest tests/test_core.py -q
-.venv/bin/python run_experiments.py --config configs/example_experiments.yaml --dry-run
+.venv/bin/python -m pytest -q
 .venv/bin/python -m compileall -q app.py pages src run_experiments.py run_rag_evaluation.py
 ```
 
+Tests use fake encoders (`tests/fakes.py`) and never download models.
+
 The example experiment config validates structure only; its index directory is not a real searchable index.
-
-
