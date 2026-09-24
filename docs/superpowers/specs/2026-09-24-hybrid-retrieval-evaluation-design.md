@@ -134,7 +134,7 @@ normalize(query)
 - RRF chỉ cộng các nhánh có mặt.
 - Khi hòa điểm, sắp theo `chunk_id` tăng dần.
 
-**`adaptive_alpha`** giữ công thức hiện tại, nhưng β lấy từ config và clamp [0.1, 0.9].
+**`adaptive_alpha`**: `max_idf` được chuẩn hóa theo idf lớn nhất của corpus (code cũ dùng idf thô nên luôn bão hòa); α = clamp(α0 + β·(2·lexical − 1), 0.1, 0.9) — truy vấn từ vựng tăng α, truy vấn ngữ nghĩa giảm α; β lấy từ config.
 
 Mỗi `RetrievedChunk` mang `StageScores`: `sparse_score, sparse_rank, dense_score, dense_rank, fusion_score, rerank_score, rank` (None nếu tầng không chạy). Ngoài ra pipeline trả `timings_ms: {sparse, dense, fusion, rerank, total}` và `alpha_used` (cho adaptive).
 
