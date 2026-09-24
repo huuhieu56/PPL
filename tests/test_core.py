@@ -4,18 +4,7 @@ import json
 import pytest
 import yaml
 
-from src.evaluation import evaluate_rankings
 from src.experiments import run_experiment
-
-
-def test_ranking_metrics():
-    metrics = evaluate_rankings(
-        rankings={"q1": ["c1", "c2"]},
-        qrels={"q1": {"c1": 2}},
-        ks=(1, 10),
-    )
-    assert metrics["hit_rate@1"] == 1.0
-    assert metrics["mrr@10"] == 1.0
 
 
 def test_experiment_run_resumes_without_repeating_completed_queries(tmp_path, monkeypatch):

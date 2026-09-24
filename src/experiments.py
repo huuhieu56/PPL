@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from src.config import load_yaml
-from src.evaluation import evaluate_rankings
+from src.eval.metrics import evaluate_rankings
 from src.index import RetrievalIndex
 from src.models import PipelineConfig
 from src.pipeline import RetrievalPipeline
