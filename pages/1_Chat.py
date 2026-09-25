@@ -37,6 +37,11 @@ if invalid:
     st.sidebar.warning(f"Bỏ qua cấu hình cũ: {', '.join(invalid)}")
 config_name = st.sidebar.selectbox("Cấu hình RAG", list(config_by_name) or ["Mặc định"])
 config = config_by_name.get(config_name, PipelineConfig(llm_model=settings.openai_model))
+enable_rewrite = st.sidebar.checkbox(
+    "Chuẩn hóa câu hỏi (Query Rewrite)",
+    value=True,
+    help="Tự động chuẩn hóa câu hỏi, liên kết ngữ cảnh từ các câu hỏi trước và tối ưu từ khóa tìm kiếm học liệu.",
+)
 client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url)
 
 
@@ -51,6 +56,8 @@ if "chat_messages" not in st.session_state:
 for message in st.session_state.chat_messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
+        if message.get("rewritten_query"):
+            st.caption(f"🔍 **Truy vấn đã chuẩn hóa:** *{message['rewritten_query']}*")
         for citation in message.get("citations", []):
             with st.expander(citation_label(citation)):
                 st.write(citation["text"])
@@ -62,11 +69,25 @@ if query := st.chat_input("Nhập câu hỏi về tài liệu..."):
     with st.chat_message("assistant"):
         with st.spinner("Đang tìm tài liệu và tạo câu trả lời..."):
             try:
-                answer = answer_question(query, pipeline, config, client, config.llm_model or settings.openai_model)
+                answer = answer_question(
+                    query,
+                    pipeline,
+                    config,
+                    client,
+                    config.llm_model or settings.openai_model,
+                    chat_history=st.session_state.chat_messages[:-1],
+                    enable_rewrite=enable_rewrite,
+                )
             except ValueError as error:
                 st.error(f"Không thể truy xuất với cấu hình '{config_name}': {error}")
                 st.stop()
         st.markdown(answer.text)
+        show_rewritten = bool(
+            answer.rewritten_query
+            and answer.rewritten_query.strip().lower() != query.strip().lower()
+        )
+        if show_rewritten:
+            st.caption(f"🔍 **Truy vấn đã chuẩn hóa:** *{answer.rewritten_query}*")
         st.caption(f"Thời gian: {answer.retrieval_ms + answer.generation_ms:.0f} ms")
         for citation in answer.citations:
             with st.expander(citation_label(citation)):
@@ -76,6 +97,7 @@ if query := st.chat_input("Nhập câu hỏi về tài liệu..."):
             "session_id": st.session_state.chat_session_id,
             "username": user["username"],
             "query": query,
+            "rewritten_query": answer.rewritten_query if show_rewritten else "",
             "answer": answer.text,
             "citations": answer.citations,
             "latency_ms": answer.retrieval_ms + answer.generation_ms,
@@ -86,6 +108,7 @@ if query := st.chat_input("Nhập câu hỏi về tài liệu..."):
             "role": "assistant",
             "content": answer.text,
             "citations": answer.citations,
+            "rewritten_query": answer.rewritten_query if show_rewritten else "",
             "message_id": message_id,
         }
     )

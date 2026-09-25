@@ -3,6 +3,7 @@ import time
 from dataclasses import dataclass
 
 from src.models import PipelineConfig
+from src.rewrite import rewrite_query
 
 
 REFUSAL_TEXT = "Không tìm thấy đủ thông tin trong tài liệu để trả lời câu hỏi này."
@@ -17,6 +18,7 @@ class RagAnswer:
     completion_tokens: int
     retrieval_ms: float
     generation_ms: float
+    rewritten_query: str = ""
 
 
 def _prompt(query: str, results) -> list[dict]:
@@ -74,13 +76,26 @@ def answer_question(
     config: PipelineConfig,
     client,
     model: str,
+    chat_history: list[dict] | None = None,
+    enable_rewrite: bool = False,
 ) -> RagAnswer:
-    retrieval = pipeline.run(query, config, use_cache=False)
+    effective_query = query
+    if enable_rewrite:
+        effective_query, _ = rewrite_query(
+            query=query,
+            chat_history=chat_history,
+            client=client,
+            model=model,
+            enable_llm=client is not None,
+            timeout_seconds=min(10, config.timeout_seconds),
+        )
+
+    retrieval = pipeline.run(effective_query, config, use_cache=False)
     results = retrieval.results[: config.context_k]
     retrieval_ms = retrieval.timings_ms["total"]
     confidence = results[0].score if results else float("-inf")
     if confidence < config.refusal_threshold:
-        return RagAnswer(REFUSAL_TEXT, [], True, 0, 0, retrieval_ms, 0.0)
+        return RagAnswer(REFUSAL_TEXT, [], True, 0, 0, retrieval_ms, 0.0, rewritten_query=effective_query)
 
     generation_started = time.perf_counter()
     last_error = None
@@ -89,7 +104,7 @@ def answer_question(
         try:
             response = client.chat.completions.create(
                 model=model,
-                messages=_prompt(query, results),
+                messages=_prompt(effective_query, results),
                 temperature=config.temperature,
                 timeout=config.timeout_seconds,
             )
@@ -111,4 +126,5 @@ def answer_question(
         completion_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
         retrieval_ms=retrieval_ms,
         generation_ms=(time.perf_counter() - generation_started) * 1000,
+        rewritten_query=effective_query,
     )
