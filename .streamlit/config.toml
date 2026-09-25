@@ -1,0 +1,5 @@
+[server]
+# Streamlit's module watcher walks sys.modules and trips transformers' lazy
+# vision modules (they import torchvision, which we don't install), flooding
+# the log with "Examining the path of transformers.models..." tracebacks.
+fileWatcherType = "none"
