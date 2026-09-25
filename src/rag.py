@@ -2,9 +2,8 @@ import re
 import time
 from dataclasses import dataclass
 
-from src.models import RagConfig
-from src.reranking import rerank
-from src.retrieval import RetrievalIndex, retrieve
+from src.models import PipelineConfig
+from src.rewrite import rewrite_query
 
 
 REFUSAL_TEXT = "Không tìm thấy đủ thông tin trong tài liệu để trả lời câu hỏi này."
@@ -19,12 +18,13 @@ class RagAnswer:
     completion_tokens: int
     retrieval_ms: float
     generation_ms: float
+    rewritten_query: str = ""
 
 
 def _prompt(query: str, results) -> list[dict]:
     context = "\n\n".join(
-        f"[{number}] Tài liệu: {result.chunk.doc_id}; trang/slide: {result.chunk.page}; "
-        f"mục: {result.chunk.section}\n{result.chunk.text}"
+        f"[{number}] Nguồn: {result.chunk.breadcrumb()}; trang/slide: {result.chunk.page}\n"
+        f"{result.chunk.body}"
         for number, result in enumerate(results, start=1)
     )
     return [
@@ -58,9 +58,10 @@ def _valid_citations(text: str, results) -> tuple[str, list[dict]]:
                     "number": number,
                     "chunk_id": result.chunk.chunk_id,
                     "doc_id": result.chunk.doc_id,
+                    "doc_title": result.chunk.doc_title,
+                    "heading_path": list(result.chunk.heading_path),
                     "page": result.chunk.page,
-                    "section": result.chunk.section,
-                    "text": result.chunk.text,
+                    "text": result.chunk.body,
                 }
             )
         return match.group(0)
@@ -71,20 +72,30 @@ def _valid_citations(text: str, results) -> tuple[str, list[dict]]:
 
 def answer_question(
     query: str,
-    index: RetrievalIndex,
-    config: RagConfig,
+    pipeline,
+    config: PipelineConfig,
     client,
     model: str,
+    chat_history: list[dict] | None = None,
+    enable_rewrite: bool = False,
 ) -> RagAnswer:
-    retrieval_started = time.perf_counter()
-    results = retrieve(query, index, config)
-    if config.use_reranker:
-        results, _ = rerank(query, results, config.rerank_n)
-    results = results[: config.context_k]
-    retrieval_ms = (time.perf_counter() - retrieval_started) * 1000
+    effective_query = query
+    if enable_rewrite:
+        effective_query, _ = rewrite_query(
+            query=query,
+            chat_history=chat_history,
+            client=client,
+            model=model,
+            enable_llm=client is not None,
+            timeout_seconds=min(10, config.timeout_seconds),
+        )
+
+    retrieval = pipeline.run(effective_query, config, use_cache=False)
+    results = retrieval.results[: config.context_k]
+    retrieval_ms = retrieval.timings_ms["total"]
     confidence = results[0].score if results else float("-inf")
     if confidence < config.refusal_threshold:
-        return RagAnswer(REFUSAL_TEXT, [], True, 0, 0, retrieval_ms, 0.0)
+        return RagAnswer(REFUSAL_TEXT, [], True, 0, 0, retrieval_ms, 0.0, rewritten_query=effective_query)
 
     generation_started = time.perf_counter()
     last_error = None
@@ -93,9 +104,9 @@ def answer_question(
         try:
             response = client.chat.completions.create(
                 model=model,
-                messages=_prompt(query, results),
-                temperature=0,
-                timeout=60,
+                messages=_prompt(effective_query, results),
+                temperature=config.temperature,
+                timeout=config.timeout_seconds,
             )
             break
         except Exception as error:
@@ -107,13 +118,13 @@ def answer_question(
         raise RuntimeError("LLM did not return a response") from last_error
     text, citations = _valid_citations(response.choices[0].message.content or "", results)
     usage = getattr(response, "usage", None)
-    refused = text.strip() == REFUSAL_TEXT
     return RagAnswer(
         text=text,
         citations=citations,
-        refused=refused,
+        refused=text.strip() == REFUSAL_TEXT,
         prompt_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
         completion_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
         retrieval_ms=retrieval_ms,
         generation_ms=(time.perf_counter() - generation_started) * 1000,
+        rewritten_query=effective_query,
     )

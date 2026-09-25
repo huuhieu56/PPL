@@ -1,22 +1,26 @@
-paths:
-  data_dir: data
-  runs_dir: runs
-  database: data/app.db
+chunking:
+  strategy: structure
+  max_words: 350
+  overlap_words: 50
+  chunk_words: 450
+  fixed_overlap_words: 75
+  prefix: true
 
-retrieval:
-  method: adaptive
-  tokenizer: whitespace
+index:
   embedding_model: BAAI/bge-m3
-  reranker_model: BAAI/bge-reranker-v2-m3
-  top_l: 100
-  rerank_n: 20
-  context_k: 5
-  alpha: 0.5
-  adaptive_beta: 0.3
-  rrf_k: 60
-  refusal_threshold: 0.0
-  use_reranker: true
+  tokenizers: [whitespace, pyvi]
+  dense_backend: numpy
+  bm25_k1: 1.5
+  bm25_b: 0.75
 
-generation:
-  temperature: 0
-  timeout_seconds: 60
+pipeline:
+  fusion: weighted
+  alpha: 0.5
+  rrf_k: 60
+  adaptive_beta: 0.3
+  rerank: true
+  rerank_n: 30
+  top_l: 100
+  context_k: 5
+  tokenizer: whitespace
+  reranker_model: BAAI/bge-reranker-v2-m3

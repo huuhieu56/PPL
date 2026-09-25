@@ -13,9 +13,12 @@ Local Streamlit application for grounded question answering over Vietnamese lear
 
 ```bash
 uv venv --python 3.11 .venv
-uv pip install --python .venv/bin/python -r requirements.txt --torch-backend cpu
+uv pip install --python .venv/bin/python -r requirements.txt --torch-backend cpu      # Linux/macOS
+uv pip install --python .venv/Scripts/python.exe -r requirements.txt --torch-backend cpu # Windows
 cp .env.example .env
 ```
+
+VnCoreNLP (optional tokenizer) needs Java 8+; its model downloads to `vncorenlp/` or `PPL_VNCORENLP_DIR`.
 
 Set these values in `.env`:
 
@@ -31,6 +34,14 @@ STUDENT_PASSWORD=change-this-password
 
 `.env`, uploaded documents, indexes, SQLite databases, and experiment outputs are ignored by Git.
 
+## Data locations
+
+- `PPL_DATA_DIR` (default `data/`) holds uploads, processed corpora, indexes, `app.db`, and the retrieval cache (`cache/retrieval.sqlite`).
+- `PPL_RUNS_DIR` (default `runs/`) holds experiment runs.
+- An index lives in `data/indexes/<version>/`: `chunks.jsonl`, `embeddings.npy`, `tokens_<tokenizer>.json`, `index_meta.json`, and optionally `faiss.index`.
+
+**Indexes built before the structure-aware pipeline are not compatible — rebuild them from the Documents page.**
+
 ## Run the application
 
 ```bash
@@ -38,27 +49,37 @@ STUDENT_PASSWORD=change-this-password
 ```
 
 1. Sign in as administrator.
-2. Open **Documents**, upload PDF/DOCX/PPTX, preview extraction, then build and activate the index.
-3. Open **RAG Settings** and save a named configuration.
+2. Open **Documents**, upload PDF/DOCX/PPTX, choose the chunking strategy (default: structure-aware with `Document > Chapter > Section` prefix), preview extraction, then build and activate the index.
+3. Open **RAG Settings**, choose BM25/Dense/Hybrid, the fusion method and the reranker, and save a named configuration.
 4. Sign in as student or remain admin, then use **Chat**.
 
-The first index build downloads `BAAI/bge-m3`. Enabling reranking downloads `BAAI/bge-reranker-v2-m3`. On CPU, the interactive default reranks 20 candidates.
+The first index build downloads `BAAI/bge-m3`. Enabling reranking downloads `BAAI/bge-reranker-v2-m3`. The default reranks the top 30 fused candidates.
 
-## Benchmark schema
+## Build the benchmark
 
-Each line of `queries.jsonl` must contain:
+Each command reads and writes files in `<data_dir>/benchmark/` (override with `--bench DIR`) and uses the active index (override with `--index DIR`):
 
-```json
-{"query_id":"q1","text":"Câu hỏi","category":"concept","split":"test"}
+```bash
+python -m src.cli index build --input path/to/docs --course CS101        # index + activate
+python -m src.cli bench generate --per-category 60                         # LLM drafts → drafts.jsonl, rejected.jsonl
+python -m src.cli bench review-export                                      # review.csv: action keep/edit/drop
+python -m src.cli bench review-import --human human_queries.csv            # queries.jsonl (+ human-written questions)
+python -m src.cli bench pool --depth 15 --annotators A,B                   # annotation_A.csv, annotation_B.csv
+python -m src.cli bench agreement --annotations annotation_A.csv annotation_B.csv [--resolved disagreements.csv]
+python -m src.cli bench split --dev 0.3 --seed 42                          # dev/test + benchmark_manifest.json
+python -m src.cli bench describe                                           # benchmark_description.json
+python -m src.cli bench remap --target-index DIR --out qrels_remapped.jsonl  # relabel for another chunking
 ```
 
-Each line of `qrels.jsonl` represents one graded relevance judgment:
+File formats:
 
-```json
-{"query_id":"q1","chunk_id":"chunk-id","relevance":2}
-```
+- `queries.jsonl`: `query_id, text, category (exact|concept|paraphrase|multi), origin (llm|human), split, source_chunk_ids, evidence, generator`
+- `qrels.jsonl`: `query_id, chunk_id, relevance (0|1|2)`
+- `evidence.jsonl`: `query_id, doc_id, page, quote, relevance`
+- `human_queries.csv`: `text, category[, query_id]`
+- `manual_additions.csv`: `query_id, chunk_id`
 
-Relevance is `0` (irrelevant), `1` (supporting), or `2` (direct answer). Example-only files are under `data/benchmark/`; replace their chunk IDs with IDs from the active corpus.
+Annotators fill `relevance` (0 = irrelevant, 1 = supporting, 2 = direct answer) and, when relevance ≥ 1, `evidence_quote` (a verbatim excerpt from the chunk). Have both annotators label at least 30% of the questions so κ is meaningful. Queries with no relevant chunk are dropped at `split`.
 
 ## Run retrieval experiments
 
@@ -98,14 +119,11 @@ Human raters fill the empty scoring columns in `rag_answers_blinded.csv`. Keep `
 
 ## Verification
 
-The project intentionally has four behavior-level tests rather than tests generated per function:
-
 ```bash
-.venv/bin/python -m pytest tests/test_core.py -q
-.venv/bin/python run_experiments.py --config configs/example_experiments.yaml --dry-run
+.venv/bin/python -m pytest -q
 .venv/bin/python -m compileall -q app.py pages src run_experiments.py run_rag_evaluation.py
 ```
 
+Tests use fake encoders (`tests/fakes.py`) and never download models.
+
 The example experiment config validates structure only; its index directory is not a real searchable index.
-
-

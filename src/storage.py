@@ -3,7 +3,7 @@ import sqlite3
 import uuid
 from pathlib import Path
 
-from src.models import RagConfig
+from src.models import PipelineConfig
 
 
 class Database:
@@ -70,7 +70,7 @@ class Database:
                 """
             )
 
-    def save_rag_config(self, name: str, config: RagConfig) -> None:
+    def save_rag_config(self, name: str, config: PipelineConfig) -> None:
         with self._connect() as connection:
             connection.execute(
                 """
@@ -91,6 +91,16 @@ class Database:
             {"name": row["name"], "config": json.loads(row["config_json"]), "updated_at": row["updated_at"]}
             for row in rows
         ]
+
+    def load_pipeline_configs(self) -> tuple[dict[str, PipelineConfig], list[str]]:
+        valid: dict[str, PipelineConfig] = {}
+        invalid: list[str] = []
+        for item in self.list_rag_configs():
+            try:
+                valid[item["name"]] = PipelineConfig.from_dict(item["config"])
+            except (TypeError, ValueError):
+                invalid.append(item["name"])
+        return valid, invalid
 
     def upsert_user(self, username: str, password_hash: str, salt: str, role: str) -> None:
         with self._connect() as connection:
@@ -146,7 +156,7 @@ class Database:
         payload = {key: value for key, value in record.items() if key != "version_id"}
         with self._connect() as connection:
             connection.execute(
-                "INSERT INTO corpus_versions(version_id, metadata_json) VALUES (?, ?)",
+                "INSERT OR IGNORE INTO corpus_versions(version_id, metadata_json) VALUES (?, ?)",
                 (version_id, json.dumps(payload, ensure_ascii=False)),
             )
 

@@ -10,3 +10,7 @@ openai
 python-dotenv
 pyyaml
 pytest
+faiss-cpu
+py_vncorenlp
+matplotlib
+ranx

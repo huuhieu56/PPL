@@ -10,15 +10,16 @@ from pathlib import Path
 from openai import OpenAI
 
 from src.config import load_settings, load_yaml
-from src.models import RagConfig
+from src.index import RetrievalIndex
+from src.models import PipelineConfig
+from src.pipeline import RetrievalPipeline
 from src.rag import answer_question
-from src.retrieval import RetrievalIndex
 
 
 SYSTEMS = {
-    "dense": RagConfig(method="dense", use_reranker=False),
-    "fixed_hybrid": RagConfig(method="weighted", alpha=0.5, use_reranker=True),
-    "adaptive_e7": RagConfig(method="adaptive", alpha=0.5, use_reranker=True),
+    "C2": PipelineConfig(sparse=False, dense=True, fusion="none", rerank=False),
+    "C3-WS": PipelineConfig(fusion="weighted", alpha=0.5, rerank=False),
+    "X2-R": PipelineConfig(fusion="adaptive", alpha=0.5, rerank=True),
 }
 SCORE_COLUMNS = ("correctness_1_5", "faithfulness_1_5", "citation_correct_0_1")
 
@@ -32,7 +33,7 @@ def generate(config_path: Path) -> Path:
     settings = load_settings()
     if not settings.openai_api_key or not settings.openai_model:
         raise ValueError("OPENAI_API_KEY and OPENAI_MODEL are required")
-    index = RetrievalIndex.load(config["index_dir"])
+    pipeline = RetrievalPipeline(RetrievalIndex.load(config["index_dir"]))
     queries = _jsonl(Path(config["queries"]))
     seed = int(config.get("seed", 42))
     rng = random.Random(seed)
@@ -50,7 +51,7 @@ def generate(config_path: Path) -> Path:
                 f"{seed}|{query['query_id']}|{position}".encode()
             ).hexdigest()[:16]
             answer = answer_question(
-                query["text"], index, SYSTEMS[system_name], client, settings.openai_model
+                query["text"], pipeline, SYSTEMS[system_name], client, settings.openai_model
             )
             key[item_id] = {"query_id": query["query_id"], "system": system_name}
             rows.append(

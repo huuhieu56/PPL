@@ -1,0 +1,49 @@
+# Ma trận thực nghiệm theo Bảng 2.2 (C1–C4) và các hướng khai thác X1–X6 (Chương 3, mục 3.6).
+# "frozen" = lấy từ <bench_dir>/frozen_params.yaml do `python -m src.cli eval tune` ghi ra.
+bench_dir: examples/benchmark
+index_dir: examples/index
+runs_dir: ${RUNS_DIR}
+seed: 42
+ks: [1, 3, 5, 10]
+primary_metric: mrr@10
+secondary_metrics: [ndcg@10, recall@5]
+latency:
+  warmup: 5
+
+defaults:
+  top_l: 100
+  context_k: 5
+  tokenizer: whitespace
+  reranker_model: BAAI/bge-reranker-v2-m3
+
+configs:
+  C1: {sparse: true, dense: false, fusion: none, rerank: false}
+  C2: {sparse: false, dense: true, fusion: none, rerank: false}
+  C3-RRF: {fusion: rrf, rrf_k: frozen, rerank: false}
+  C3-WS: {fusion: weighted, alpha: frozen, rerank: false}
+  C4-RRF: {fusion: rrf, rrf_k: frozen, rerank: true, rerank_n: frozen}
+  C4-WS: {fusion: weighted, alpha: frozen, rerank: true, rerank_n: frozen}
+  X1: {sparse: false, dense: true, fusion: none, rerank: true, rerank_n: frozen}
+  X2: {fusion: adaptive, alpha: frozen, adaptive_beta: frozen, rerank: false}
+  X2-R: {fusion: adaptive, alpha: frozen, adaptive_beta: frozen, rerank: true, rerank_n: frozen}
+  X3-pyvi-C1: {sparse: true, dense: false, fusion: none, rerank: false, tokenizer: pyvi}
+  X3-pyvi-C3-WS: {fusion: weighted, alpha: frozen, rerank: false, tokenizer: pyvi}
+  X5-N10: {fusion: weighted, alpha: frozen, rerank: true, rerank_n: 10}
+  X5-N20: {fusion: weighted, alpha: frozen, rerank: true, rerank_n: 20}
+  X5-N50: {fusion: weighted, alpha: frozen, rerank: true, rerank_n: 50}
+  # X3 với VnCoreNLP (cần Java; build trước: python -m src.cli index add-tokenizer --tokenizer vncorenlp --index <dir>)
+  # X3-vncorenlp-C1: {sparse: true, dense: false, fusion: none, rerank: false, tokenizer: vncorenlp}
+  # X4 (chunking): build index thứ hai với --strategy fixed hoặc --no-prefix --no-activate, rồi bỏ comment:
+  # X4-fixed-C4-WS: {fusion: weighted, alpha: frozen, rerank: true, rerank_n: frozen, index_dir: ${DATA_DIR}/indexes/<version>, qrels: remap}
+  # X6 (embedding): build index thứ hai với --embedding-model <model tiếng Việt> --no-activate, rồi bỏ comment:
+  # X6-C2: {sparse: false, dense: true, fusion: none, rerank: false, index_dir: ${DATA_DIR}/indexes/<version>}
+
+comparisons:
+  RQ2: [[C3-RRF, best_single], [C3-WS, best_single]]
+  RQ3: [[C4-RRF, C3-RRF], [C4-WS, C3-WS], [X1, C2]]
+  X2: [[X2, C3-WS], [X2-R, C4-WS]]
+
+error_analysis:
+  target: C4-WS
+  k: 10
+  sample: 50
