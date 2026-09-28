@@ -46,6 +46,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS chat_sessions (
                     session_id TEXT PRIMARY KEY,
                     username TEXT NOT NULL,
+                    corpus_version TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE TABLE IF NOT EXISTS messages (
@@ -60,15 +61,39 @@ class Database:
                     payload_json TEXT NOT NULL,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
-                CREATE TABLE IF NOT EXISTS experiment_runs (
-                    run_id TEXT PRIMARY KEY,
-                    status TEXT NOT NULL,
-                    payload_json TEXT NOT NULL,
-                    result_path TEXT,
-                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                );
                 """
             )
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(chat_sessions)")}
+            if "corpus_version" not in columns:
+                connection.execute("ALTER TABLE chat_sessions ADD COLUMN corpus_version TEXT NOT NULL DEFAULT ''")
+            if "scope_json" not in columns:
+                connection.execute("ALTER TABLE chat_sessions ADD COLUMN scope_json TEXT NOT NULL DEFAULT '[]'")
+
+    def start_chat_session(self, session_id: str, username: str, corpus_version: str, doc_ids: tuple[str, ...] = ()) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO chat_sessions(session_id, username, corpus_version, scope_json) VALUES (?, ?, ?, ?)",
+                (session_id, username, corpus_version, json.dumps(sorted(set(doc_ids)))),
+            )
+
+    def list_chat_sessions(self, username: str, corpus_version: str, doc_ids: tuple[str, ...] = ()) -> list[dict]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT session_id, created_at FROM chat_sessions WHERE username = ? AND corpus_version = ? AND scope_json = ? ORDER BY created_at DESC, rowid DESC",
+                (username, corpus_version, json.dumps(sorted(set(doc_ids)))),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def chat_turns(self, session_id: str, username: str) -> list[dict]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT m.message_id, m.payload_json FROM messages AS m
+                   JOIN chat_sessions AS s ON s.session_id = m.session_id
+                   WHERE s.session_id = ? AND s.username = ?
+                   ORDER BY m.created_at, m.rowid""",
+                (session_id, username),
+            ).fetchall()
+        return [{"message_id": row["message_id"], **json.loads(row["payload_json"])} for row in rows]
 
     def save_rag_config(self, name: str, config: RagConfig) -> None:
         with self._connect() as connection:
@@ -113,19 +138,6 @@ class Database:
             ).fetchone()
         return dict(row) if row else None
 
-    def save_document(self, record: dict) -> None:
-        payload = {key: value for key, value in record.items() if key not in {"doc_id", "status"}}
-        with self._connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO documents(doc_id, metadata_json, status) VALUES (?, ?, ?)
-                ON CONFLICT(doc_id) DO UPDATE SET
-                    metadata_json = excluded.metadata_json,
-                    status = excluded.status
-                """,
-                (record["doc_id"], json.dumps(payload, ensure_ascii=False), record["status"]),
-            )
-
     def list_documents(self) -> list[dict]:
         with self._connect() as connection:
             rows = connection.execute(
@@ -141,14 +153,30 @@ class Database:
             for row in rows
         ]
 
-    def save_corpus_version(self, record: dict) -> None:
+    def publish_corpus(self, documents: list[dict], record: dict) -> None:
+        """Commit document registry, corpus metadata, and active pointer together."""
         version_id = record["version_id"]
         payload = {key: value for key, value in record.items() if key != "version_id"}
         with self._connect() as connection:
-            connection.execute(
-                "INSERT INTO corpus_versions(version_id, metadata_json) VALUES (?, ?)",
-                (version_id, json.dumps(payload, ensure_ascii=False)),
-            )
+            existing = connection.execute(
+                "SELECT metadata_json FROM corpus_versions WHERE version_id = ?", (version_id,)
+            ).fetchone()
+            if existing and json.loads(existing[0]) != payload:
+                raise ValueError(f"Corpus version metadata differs: {version_id}")
+            for document in documents:
+                document_payload = {key: value for key, value in document.items() if key != "doc_id"}
+                connection.execute(
+                    """INSERT INTO documents(doc_id, metadata_json, status) VALUES (?, ?, 'processed')
+                       ON CONFLICT(doc_id) DO UPDATE SET metadata_json = excluded.metadata_json, status = 'processed'""",
+                    (document["doc_id"], json.dumps(document_payload, ensure_ascii=False)),
+                )
+            if not existing:
+                connection.execute(
+                    "INSERT INTO corpus_versions(version_id, metadata_json) VALUES (?, ?)",
+                    (version_id, json.dumps(payload, ensure_ascii=False)),
+                )
+            connection.execute("UPDATE corpus_versions SET active = 0")
+            connection.execute("UPDATE corpus_versions SET active = 1 WHERE version_id = ?", (version_id,))
 
     def get_active_corpus(self) -> dict | None:
         with self._connect() as connection:
@@ -159,26 +187,18 @@ class Database:
             return None
         return {"version_id": row["version_id"], **json.loads(row["metadata_json"])}
 
-    def set_active_corpus(self, version_id: str) -> None:
-        with self._connect() as connection:
-            exists = connection.execute(
-                "SELECT 1 FROM corpus_versions WHERE version_id = ?", (version_id,)
-            ).fetchone()
-            if exists is None:
-                raise KeyError(f"Unknown corpus version: {version_id}")
-            connection.execute("UPDATE corpus_versions SET active = 0")
-            connection.execute(
-                "UPDATE corpus_versions SET active = 1 WHERE version_id = ?", (version_id,)
-            )
-
     def save_message(self, record: dict) -> str:
         message_id = record.get("message_id", uuid.uuid4().hex)
-        payload = {key: value for key, value in record.items() if key not in {"message_id", "session_id"}}
+        payload = {key: value for key, value in record.items() if key not in {"message_id", "session_id", "username"}}
         with self._connect() as connection:
-            connection.execute(
-                "INSERT INTO messages(message_id, session_id, payload_json) VALUES (?, ?, ?)",
-                (message_id, record["session_id"], json.dumps(payload, ensure_ascii=False)),
+            cursor = connection.execute(
+                """INSERT INTO messages(message_id, session_id, payload_json)
+                   SELECT ?, session_id, ? FROM chat_sessions
+                   WHERE session_id = ? AND username = ?""",
+                (message_id, json.dumps(payload, ensure_ascii=False), record["session_id"], record["username"]),
             )
+            if cursor.rowcount != 1:
+                raise PermissionError("Chat session does not belong to user")
         return message_id
 
     def save_feedback(self, record: dict) -> str:

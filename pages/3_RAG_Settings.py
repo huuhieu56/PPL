@@ -12,13 +12,15 @@ db = database()
 st.title("Cấu hình RAG")
 
 with st.form("rag_config"):
-    name = st.text_input("Tên cấu hình", "adaptive-default")
-    method = st.selectbox("Phương pháp", ["bm25", "dense", "rrf", "weighted", "adaptive"])
-    use_reranker = st.checkbox("Dùng reranker", True)
+    name = st.text_input("Tên cấu hình", "dense-default")
+    method = st.selectbox("Phương pháp", ["bm25", "dense", "rrf", "weighted", "adaptive"], index=1)
+    use_reranker = st.checkbox("Dùng reranker", False)
     top_l = st.number_input("Top-L mỗi retriever", 10, 500, 100)
     rerank_n = st.number_input("Candidate rerank", 5, 100, 20)
     context_k = st.number_input("Context chunks", 1, 20, 5)
+    context_parent_words = st.number_input("Ngữ cảnh cha tối đa (từ)", 450, 2000, 900, 50)
     alpha = st.slider("Alpha BM25", 0.0, 1.0, 0.5, 0.05)
+    adaptive_beta = st.slider("Beta adaptive (tune trên dev)", -1.0, 1.0, 0.3, 0.05)
     rrf_k = st.number_input("RRF k", 1, 200, 60)
     threshold = st.number_input("Ngưỡng từ chối", value=0.0, format="%.4f")
     model = st.text_input("LLM model", settings.openai_model)
@@ -37,7 +39,9 @@ if submitted:
                 top_l=int(top_l),
                 rerank_n=int(rerank_n),
                 context_k=int(context_k),
+                context_parent_words=int(context_parent_words),
                 alpha=alpha,
+                adaptive_beta=adaptive_beta,
                 rrf_k=int(rrf_k),
                 refusal_threshold=threshold,
                 use_reranker=use_reranker,
@@ -49,4 +53,4 @@ if submitted:
 
 configs = db.list_rag_configs()
 if configs:
-    st.dataframe(configs, use_container_width=True)
+    st.dataframe(configs, width="stretch")

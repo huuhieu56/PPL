@@ -41,8 +41,7 @@ def authenticate(db: Database, username: str, password: str) -> dict | None:
 def require_role(*roles: str) -> dict:
     user = st.session_state.get("user")
     if not user:
-        st.warning("Vui lòng đăng nhập từ trang chính.")
-        st.stop()
+        st.switch_page(st.session_state.home_page)
     if roles and user["role"] not in roles:
         st.error("Bạn không có quyền truy cập trang này.")
         st.stop()
@@ -51,5 +50,27 @@ def require_role(*roles: str) -> dict:
 
 def safe_upload_name(name: str) -> str:
     candidate = Path(name).name
-    cleaned = "".join(character if character.isalnum() or character in "._-" else "_" for character in candidate)
-    return cleaned[:160] or "document"
+    cleaned = "".join(character if character.isalnum() or character in " ._-" else "_" for character in candidate)
+    return cleaned[:160].strip(" .") or "document"
+
+
+def stage_uploads(uploads, staging: Path) -> list[Path]:
+    paths = []
+    seen = set()
+    for position, upload in enumerate(uploads):
+        content = upload.getvalue()
+        digest = hashlib.sha256(content).hexdigest()
+        if digest in seen:
+            continue
+        seen.add(digest)
+        path = staging / f"{position:03}-{digest[:12]}" / safe_upload_name(upload.name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        paths.append(path)
+    return paths
+
+
+def citation_label(citation: dict, names: dict[str, str]) -> str:
+    source = names.get(citation["doc_id"], citation["doc_id"])
+    locator = "đoạn" if citation.get("file_type") == "docx" or source.lower().endswith(".docx") or citation.get("source_type") == "docx" else "trang/slide"
+    return f"[{citation['number']}] {source} — {locator} {citation['page']}–{citation.get('page_end') or citation['page']}"

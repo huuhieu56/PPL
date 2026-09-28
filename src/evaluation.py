@@ -1,9 +1,6 @@
-import csv
-import json
 import math
-from pathlib import Path
-
-import numpy as np
+import random
+import statistics
 
 
 def evaluate_rankings(
@@ -23,7 +20,7 @@ def evaluate_rankings(
             None,
         )
         reciprocal_ranks.append(0.0 if first is None or first > 10 else 1 / first)
-    metrics["mrr@10"] = float(np.mean(reciprocal_ranks))
+    metrics["mrr@10"] = statistics.mean(reciprocal_ranks)
     for k in ks:
         hits, precisions, recalls, ndcgs = [], [], [], []
         for query_id in query_ids:
@@ -38,32 +35,36 @@ def evaluate_rankings(
             ideal = sorted(grades.values(), reverse=True)[:k]
             idcg = sum((2**grade - 1) / math.log2(rank + 1) for rank, grade in enumerate(ideal, start=1))
             ndcgs.append(dcg / idcg if idcg else 0.0)
-        metrics[f"hit_rate@{k}"] = float(np.mean(hits))
-        metrics[f"precision@{k}"] = float(np.mean(precisions))
-        metrics[f"recall@{k}"] = float(np.mean(recalls))
-        metrics[f"ndcg@{k}"] = float(np.mean(ndcgs))
+        metrics[f"hit_rate@{k}"] = statistics.mean(hits)
+        metrics[f"precision@{k}"] = statistics.mean(precisions)
+        metrics[f"recall@{k}"] = statistics.mean(recalls)
+        metrics[f"ndcg@{k}"] = statistics.mean(ndcgs)
     return metrics
 
 
 def paired_bootstrap_ci(
-    left: list[float], right: list[float], seed: int = 42, samples: int = 2000
+    left: list[float], right: list[float], seed: int = 42, samples: int = 2000, groups: list[str] | None = None
 ) -> tuple[float, float]:
     if len(left) != len(right) or not left:
         raise ValueError("paired samples must have the same non-zero length")
-    differences = np.asarray(left, dtype=float) - np.asarray(right, dtype=float)
-    rng = np.random.default_rng(seed)
-    means = [float(np.mean(rng.choice(differences, size=len(differences), replace=True))) for _ in range(samples)]
-    return float(np.percentile(means, 2.5)), float(np.percentile(means, 97.5))
+    if samples <= 0:
+        raise ValueError("samples must be positive")
+    differences = [float(a) - float(b) for a, b in zip(left, right)]
+    rng = random.Random(seed)
+    if groups is None:
+        means = sorted(statistics.mean(rng.choices(differences, k=len(differences))) for _ in range(samples))
+    else:
+        if len(groups) != len(differences):
+            raise ValueError("groups must match paired samples")
+        clustered: dict[str, list[float]] = {}
+        for group, difference in zip(groups, differences):
+            clustered.setdefault(group, []).append(difference)
+        clusters = list(clustered.values())
+        means = sorted(statistics.mean(value for cluster in rng.choices(clusters, k=len(clusters)) for value in cluster) for _ in range(samples))
 
+    def percentile(p: float) -> float:
+        position = (len(means) - 1) * p
+        low = math.floor(position)
+        return means[low] + (means[math.ceil(position)] - means[low]) * (position - low)
 
-def write_evaluation(
-    output_dir: Path | str, metrics: dict[str, float], per_query: list[dict]
-) -> None:
-    target = Path(output_dir)
-    target.mkdir(parents=True, exist_ok=True)
-    (target / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
-    if per_query:
-        with (target / "per_query.csv").open("w", encoding="utf-8", newline="") as stream:
-            writer = csv.DictWriter(stream, fieldnames=list(per_query[0]))
-            writer.writeheader()
-            writer.writerows(per_query)
+    return percentile(0.025), percentile(0.975)

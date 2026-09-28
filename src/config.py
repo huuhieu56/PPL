@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -12,7 +12,7 @@ class Settings:
     data_dir: Path
     runs_dir: Path
     db_path: Path
-    openai_api_key: str
+    openai_api_key: str = field(repr=False)
     openai_base_url: str
     openai_model: str
 

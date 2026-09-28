@@ -16,8 +16,8 @@ experiments:
   E3: {method: weighted, alpha: 0.5, use_reranker: false}
   E4: {method: rrf, rrf_k: 60, use_reranker: true}
   E5: {method: weighted, alpha: 0.5, use_reranker: true}
-  E6: {method: adaptive, alpha: 0.5, use_reranker: false}
-  E7: {method: adaptive, alpha: 0.5, use_reranker: true}
+  E6: {method: adaptive, alpha: 0.5, adaptive_beta: 0.3, use_reranker: false}
+  E7: {method: adaptive, alpha: 0.5, adaptive_beta: 0.3, use_reranker: true}
 
 retrieval:
   top_l: 100

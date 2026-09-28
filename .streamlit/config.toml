@@ -1,0 +1,14 @@
+[theme]
+base = "light"
+primaryColor = "#356B56"
+backgroundColor = "#FCFBF7"
+secondaryBackgroundColor = "#F0EFE9"
+textColor = "#222C26"
+font = "sans-serif"
+
+[client]
+toolbarMode = "minimal"
+
+[server]
+# Model libraries use lazy imports; scanning them creates irrelevant import errors.
+fileWatcherType = "none"

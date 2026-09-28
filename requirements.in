@@ -5,8 +5,10 @@ python-pptx
 rank-bm25
 pyvi
 sentence-transformers
-numpy
-openai
+qdrant-client
+pyarrow
+langchain-openai
 python-dotenv
 pyyaml
 pytest
+langsmith>=0.3.13

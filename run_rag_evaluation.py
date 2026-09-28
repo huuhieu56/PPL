@@ -7,50 +7,43 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from openai import OpenAI
 
 from src.config import load_settings, load_yaml
-from src.models import RagConfig
-from src.rag import answer_question
+from src.experiments import experiment_rag_config, select_queries, validate_config
+from src.rag import answer_question, chat_model
 from src.retrieval import RetrievalIndex
 
 
-SYSTEMS = {
-    "dense": RagConfig(method="dense", use_reranker=False),
-    "fixed_hybrid": RagConfig(method="weighted", alpha=0.5, use_reranker=True),
-    "adaptive_e7": RagConfig(method="adaptive", alpha=0.5, use_reranker=True),
-}
 SCORE_COLUMNS = ("correctness_1_5", "faithfulness_1_5", "citation_correct_0_1")
 
 
-def _jsonl(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
-
-
-def generate(config_path: Path) -> Path:
+def generate(config_path: Path, split: str) -> Path:
     config = load_yaml(config_path)
+    validate_config(config, require_index=True)
+    queries = select_queries(Path(config["queries"]), split)
     settings = load_settings()
     if not settings.openai_api_key or not settings.openai_model:
         raise ValueError("OPENAI_API_KEY and OPENAI_MODEL are required")
     index = RetrievalIndex.load(config["index_dir"])
-    queries = _jsonl(Path(config["queries"]))
     seed = int(config.get("seed", 42))
     rng = random.Random(seed)
     output_dir = Path(config.get("runs_dir", settings.runs_dir)) / (
         "rag-eval-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     )
     output_dir.mkdir(parents=True)
-    client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url)
+    (output_dir / "config.json").write_text(json.dumps({**config, "evaluated_split": split}, ensure_ascii=False, indent=2), encoding="utf-8")
+    (output_dir / "input_hashes.json").write_text(json.dumps({key: hashlib.sha256(Path(config[key]).read_bytes()).hexdigest() for key in ("queries", "qrels")}), encoding="utf-8")
+    client = chat_model(settings)
     rows, key = [], {}
     for query in queries:
-        system_names = list(SYSTEMS)
+        system_names = list(config["experiments"])
         rng.shuffle(system_names)
         for position, system_name in enumerate(system_names):
             item_id = hashlib.sha256(
                 f"{seed}|{query['query_id']}|{position}".encode()
             ).hexdigest()[:16]
             answer = answer_question(
-                query["text"], index, SYSTEMS[system_name], client, settings.openai_model
+                query["text"], index, experiment_rag_config(system_name, config), client, settings.openai_model
             )
             key[item_id] = {"query_id": query["query_id"], "system": system_name}
             rows.append(
@@ -83,12 +76,20 @@ def summarize(completed_csv: Path) -> Path:
     key = json.loads(key_path.read_text(encoding="utf-8"))
     values = defaultdict(lambda: defaultdict(list))
     with completed_csv.open(encoding="utf-8") as stream:
-        for row in csv.DictReader(stream):
+        rows = list(csv.DictReader(stream))
+        ids = [row["item_id"] for row in rows]
+        if len(ids) != len(set(ids)) or set(ids) != set(key):
+            raise ValueError("Evaluation is incomplete: missing, duplicate or unknown items")
+        for row in rows:
             system = key[row["item_id"]]["system"]
             for column in SCORE_COLUMNS:
                 if row[column] == "":
                     raise ValueError(f"Missing {column} for item {row['item_id']}")
-                values[system][column].append(float(row[column]))
+                value = float(row[column])
+                allowed = {0, 1} if column == "citation_correct_0_1" else {1, 2, 3, 4, 5}
+                if value not in allowed:
+                    raise ValueError(f"Invalid {column} for item {row['item_id']}")
+                values[system][column].append(value)
     summary = {
         system: {
             column: sum(scores) / len(scores) for column, scores in columns.items()
@@ -105,8 +106,11 @@ def main() -> None:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--config", type=Path)
     group.add_argument("--summarize", type=Path)
+    parser.add_argument("--split", choices=("dev", "test"))
     arguments = parser.parse_args()
-    print(generate(arguments.config) if arguments.config else summarize(arguments.summarize))
+    if arguments.config and not arguments.split:
+        parser.error("--split dev/test is required with --config")
+    print(generate(arguments.config, arguments.split) if arguments.config else summarize(arguments.summarize))
 
 
 if __name__ == "__main__":

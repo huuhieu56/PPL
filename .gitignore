@@ -9,8 +9,12 @@ __pycache__/
 *.docx
 sample.pdf
 data/raw/
+data/sample_slides/
+data/sample_materials/
 data/processed/
 data/indexes/
+data/qdrant/
+data/external/
 runs/
 configs/generated_experiment.yaml
 
