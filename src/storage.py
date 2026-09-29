@@ -61,6 +61,15 @@ class Database:
                     payload_json TEXT NOT NULL,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS doc_requests (
+                    request_id TEXT PRIMARY KEY,
+                    username TEXT NOT NULL,
+                    subject TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    teacher_note TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
                 """
             )
             columns = {row[1] for row in connection.execute("PRAGMA table_info(chat_sessions)")}
@@ -210,3 +219,50 @@ class Database:
                 (feedback_id, record["message_id"], json.dumps(payload, ensure_ascii=False)),
             )
         return feedback_id
+
+    # ── Document management ───────────────────────────────────────────────────
+
+    def delete_document(self, doc_id: str) -> bool:
+        """Delete a document record from DB. Returns True if deleted."""
+        with self._connect() as connection:
+            cursor = connection.execute("DELETE FROM documents WHERE doc_id = ?", (doc_id,))
+        return cursor.rowcount > 0
+
+    # ── Document requests (student → teacher) ─────────────────────────────────
+
+    def save_doc_request(self, request: dict) -> str:
+        """Save a student's request for a document."""
+        request_id = uuid.uuid4().hex
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO doc_requests(request_id, username, subject, description) VALUES (?, ?, ?, ?)",
+                (
+                    request_id,
+                    request["username"],
+                    request["subject"],
+                    request.get("description", ""),
+                ),
+            )
+        return request_id
+
+    def list_doc_requests(self, status: str | None = None) -> list[dict]:
+        """List all document requests, optionally filtered by status."""
+        with self._connect() as connection:
+            if status:
+                rows = connection.execute(
+                    "SELECT * FROM doc_requests WHERE status = ? ORDER BY created_at DESC",
+                    (status,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM doc_requests ORDER BY created_at DESC"
+                ).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_doc_request_status(self, request_id: str, status: str, teacher_note: str = "") -> None:
+        """Update status of a request (pending / approved / rejected)."""
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE doc_requests SET status = ?, teacher_note = ? WHERE request_id = ?",
+                (status, teacher_note, request_id),
+            )
