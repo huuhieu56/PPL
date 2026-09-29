@@ -18,11 +18,11 @@ def load_encoder(model_name: str):
     return _ENCODERS[model_name]
 
 
-def _top(chunk_ids: list[str], values, limit: int, positive_only: bool) -> list[tuple[str, float]]:
+def _top(chunk_ids: list[str], values, limit: int, positive_only: bool, allowed=None) -> list[tuple[str, float]]:
     pairs = [
         (chunk_id, float(value))
         for chunk_id, value in zip(chunk_ids, values)
-        if not positive_only or value > 0
+        if (not positive_only or value > 0) and (allowed is None or chunk_id in allowed)
     ]
     pairs.sort(key=lambda item: (-item[1], item[0]))
     return pairs[:limit]
@@ -143,24 +143,36 @@ class RetrievalIndex:
     def idf(self, mode: str) -> dict[str, float]:
         return {token: float(value) for token, value in self._bm25_for(mode).idf.items()}
 
-    def sparse_search(self, query: str, tokenizer: str, limit: int) -> list[tuple[str, float]]:
+    def chunk_ids_for(self, doc_ids) -> set[str] | None:
+        """Chunk IDs belonging to `doc_ids`, or None (no restriction) when doc_ids is empty.
+
+        Scoped search scores the whole index and filters, so BM25 IDF stays corpus-wide.
+        """
+        if not doc_ids:
+            return None
+        unknown = set(doc_ids) - {chunk.doc_id for chunk in self.chunk_list}
+        if unknown:
+            raise ValueError(f"Documents not in index {self.version}: {sorted(unknown)}")
+        return {chunk.chunk_id for chunk in self.chunk_list if chunk.doc_id in doc_ids}
+
+    def sparse_search(self, query: str, tokenizer: str, limit: int, allowed=None) -> list[tuple[str, float]]:
         bm25 = self._bm25_for(tokenizer)
         query_tokens = tokenize(query, tokenizer)
         if not query_tokens:
             return []
-        return _top(self.chunk_ids, bm25.get_scores(query_tokens), limit, positive_only=True)
+        return _top(self.chunk_ids, bm25.get_scores(query_tokens), limit, positive_only=True, allowed=allowed)
 
     def _encoder_instance(self):
         if self._encoder is None:
             self._encoder = load_encoder(self.embedding_model)
         return self._encoder
 
-    def dense_search(self, query: str, limit: int) -> list[tuple[str, float]]:
+    def dense_search(self, query: str, limit: int, allowed=None) -> list[tuple[str, float]]:
         vector = np.asarray(
             self._encoder_instance().encode([normalize_text(query)], normalize_embeddings=True, show_progress_bar=False),
             dtype=np.float32,
         )[0]
-        if self.meta["dense_backend"] == "faiss":
+        if self.meta["dense_backend"] == "faiss" and allowed is None:
             import faiss
 
             if self._faiss is None:
@@ -172,4 +184,4 @@ class RetrievalIndex:
                 if position >= 0
             ]
             return sorted(pairs, key=lambda item: (-item[1], item[0]))
-        return _top(self.chunk_ids, self.embeddings @ vector, limit, positive_only=False)
+        return _top(self.chunk_ids, self.embeddings @ vector, limit, positive_only=False, allowed=allowed)

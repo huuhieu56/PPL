@@ -1,3 +1,14 @@
+[theme]
+base = "light"
+primaryColor = "#356B56"
+backgroundColor = "#FCFBF7"
+secondaryBackgroundColor = "#F0EFE9"
+textColor = "#222C26"
+font = "sans-serif"
+
+[client]
+toolbarMode = "minimal"
+
 [server]
 # Streamlit's module watcher walks sys.modules and trips transformers' lazy
 # vision modules (they import torchvision, which we don't install), flooding

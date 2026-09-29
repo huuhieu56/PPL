@@ -9,6 +9,9 @@ __pycache__/
 *.docx
 sample.pdf
 data/raw/
+data/sample_slides/
+data/sample_materials/
+data/external/
 data/processed/
 data/indexes/
 runs/

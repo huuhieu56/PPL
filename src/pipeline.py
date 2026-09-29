@@ -60,8 +60,12 @@ class RetrievalPipeline:
             self.cache.put_first_stage(key, cached)
         return cached
 
-    def run(self, query: str, config: PipelineConfig, use_cache: bool = True) -> PipelineResult:
+    def run(self, query: str, config: PipelineConfig, use_cache: bool = True, doc_ids=None) -> PipelineResult:
+        """`doc_ids` restricts retrieval to those documents; empty/None searches the whole index."""
         query = normalize_text(query)
+        allowed = self.index.chunk_ids_for(doc_ids)
+        # First-stage cache keys don't encode the scope, so scoped queries bypass them.
+        cache_first_stage = use_cache and allowed is None
         timings = {stage: 0.0 for stage in STAGES}
         started = self._clock()
         sparse: list[tuple[str, float]] = []
@@ -70,14 +74,14 @@ class RetrievalPipeline:
             mark = self._clock()
             sparse = self._first_stage(
                 "sparse", config.tokenizer, query, config.top_l,
-                lambda: self.index.sparse_search(query, config.tokenizer, config.top_l), use_cache,
+                lambda: self.index.sparse_search(query, config.tokenizer, config.top_l, allowed), cache_first_stage,
             )
             timings["sparse"] = (self._clock() - mark) * 1000
         if config.dense:
             mark = self._clock()
             dense = self._first_stage(
                 "dense", self.index.embedding_model, query, config.top_l,
-                lambda: self.index.dense_search(query, config.top_l), use_cache,
+                lambda: self.index.dense_search(query, config.top_l, allowed), cache_first_stage,
             )
             timings["dense"] = (self._clock() - mark) * 1000
 

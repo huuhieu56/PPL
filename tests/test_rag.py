@@ -11,7 +11,7 @@ class FakePipeline:
         self.results = results
         self.calls = []
 
-    def run(self, query, config, use_cache=True):
+    def run(self, query, config, use_cache=True, doc_ids=None):
         self.calls.append(use_cache)
         return PipelineResult(self.results, {"sparse": 1.0, "dense": 1.0, "fusion": 0.0, "rerank": 0.0, "total": 2.0})
 
@@ -57,3 +57,30 @@ def test_answer_refuses_below_threshold_without_calling_llm():
     answer = answer_question("Câu hỏi ngoài tài liệu", FakePipeline(_results()), config, client, "m")
     assert answer.refused is True and answer.text == REFUSAL_TEXT
     assert completions.calls == []
+
+
+def test_greeting_skips_retrieval_and_llm():
+    completions = FakeCompletions()
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    pipeline = FakePipeline(_results())
+    answer = answer_question("Xin chào!", pipeline, PipelineConfig(rerank=False), client, "m")
+    assert answer.refused is False and answer.citations == []
+    assert pipeline.calls == [] and completions.calls == []
+
+
+def test_answer_without_valid_citation_becomes_refusal():
+    completions = FakeCompletions()
+    completions.create = lambda **kwargs: SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="Mã môn là AI101 [7]."))], usage=None
+    )
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    answer = answer_question("Mã môn là gì?", FakePipeline(_results()), PipelineConfig(rerank=False), client, "m")
+    assert answer.refused is True and answer.text == REFUSAL_TEXT and answer.citations == []
+
+
+def test_prompt_treats_documents_as_data_not_instructions():
+    completions = FakeCompletions()
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    answer_question("Mã môn AI101 là gì?", FakePipeline(_results()), PipelineConfig(rerank=False), client, "m")
+    system = completions.calls[0]["messages"][0]["content"]
+    assert "không phải chỉ dẫn" in system and "$...$" in system

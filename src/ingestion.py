@@ -63,6 +63,25 @@ def extract_blocks(path: Path | str) -> list[Block]:
     raise ValueError(f"Unsupported document type: {suffix}")
 
 
+def _column_order(lines: list[tuple[tuple, tuple]], width: float) -> list[tuple]:
+    """Read a clean two-column page left column first; anything else keeps PyMuPDF's order.
+
+    Each item is (bbox, line). Conservative on purpose: a single line spanning the
+    middle (e.g. a full-width title) disables the reordering.
+    """
+    middle = width / 2
+    left = [item for item in lines if item[0][2] < middle - 10]
+    right = [item for item in lines if item[0][0] > middle + 10]
+    if len(left) < 2 or len(right) < 2 or len(left) + len(right) != len(lines):
+        return [line for _, line in lines]
+    by_position = lambda item: (item[0][1], item[0][0])
+    left.sort(key=by_position)
+    right.sort(key=by_position)
+    if max(left[0][0][1], right[0][0][1]) >= min(left[-1][0][3], right[-1][0][3]):
+        return [line for _, line in lines]
+    return [line for _, line in left + right]
+
+
 def _pdf_pages(document) -> list[tuple[int, object, list[tuple[int, str, float, bool]]]]:
     pages = []
     for number, page in enumerate(document, start=1):
@@ -75,13 +94,16 @@ def _pdf_pages(document) -> list[tuple[int, object, list[tuple[int, str, float, 
                 if spans:
                     lines.append(
                         (
-                            block["number"],
-                            "".join(span["text"] for span in spans),
-                            max(span["size"] for span in spans),
-                            all(span["flags"] & 16 for span in spans),
+                            tuple(line["bbox"]),
+                            (
+                                block["number"],
+                                "".join(span["text"] for span in spans),
+                                max(span["size"] for span in spans),
+                                all(span["flags"] & 16 for span in spans),
+                            ),
                         )
                     )
-        pages.append((number, page, lines))
+        pages.append((number, page, _column_order(lines, page.rect.width)))
     return pages
 
 
@@ -101,11 +123,37 @@ def _flush(blocks: list[Block], page: int, stack: list[str], buffer: list[str]) 
     buffer.clear()
 
 
+def usable_ocr(text: str) -> bool:
+    """Reject OCR output that is mostly noise from figures/diagrams."""
+    clean = text.strip()
+    return (
+        bool(clean)
+        and sum(character.isalpha() for character in clean) / len(clean) >= 0.55
+        and len(re.findall(r"\b[^\W\d_]{3,}\b", clean)) >= 5
+    )
+
+
 def _ocr_page(page) -> tuple[str, str]:
-    try:
-        return normalize_text(page.get_text("text", textpage=page.get_textpage_ocr())), ""
-    except RuntimeError:
-        return "", "Trang không có text layer và OCR không khả dụng."
+    for language in ("vie+eng", None):  # fall back to Tesseract's default if Vietnamese data is missing
+        try:
+            options = {"language": language} if language else {}
+            text = normalize_text(page.get_text("text", textpage=page.get_textpage_ocr(dpi=300, **options)))
+        except RuntimeError:
+            continue
+        if usable_ocr(text):
+            return text, ""
+        return "", "OCR bỏ qua vì kết quả giống nhiễu từ hình/sơ đồ." if text else ""
+    return "", "Trang không có text layer và OCR không khả dụng."
+
+
+def _outline(document) -> dict[int, list[tuple[int, str]]]:
+    """PDF bookmarks grouped by page: {page: [(level, title), ...]} in outline order."""
+    entries: dict[int, list[tuple[int, str]]] = {}
+    for level, title, page in document.get_toc():
+        clean = normalize_text(title)
+        if clean and page >= 1:
+            entries.setdefault(page, []).append((level, clean))
+    return entries
 
 
 def _extract_pdf(path: Path) -> list[Block]:
@@ -116,20 +164,34 @@ def _extract_pdf(path: Path) -> list[Block]:
         repeated = _repeated_lines(pages)
         has_chapters = any(_CHAPTER.match(normalize_text(line[1])) for line in all_lines)
         offset = 1 if has_chapters else 0
+        outline = _outline(document)
         stack: list[str] = []
         blocks: list[Block] = []
         for number, page, lines in pages:
+            # Outline entries found as a line on the page become headings there;
+            # the rest apply from the top of their page.
+            bookmarks = {title.casefold(): level for level, title in outline.get(number, [])}
+            on_page = {normalize_text(raw).casefold() for _, raw, _, _ in lines}
+            for level, title in outline.get(number, []):
+                if title.casefold() not in on_page:
+                    stack = _push_heading(stack, level, title)
             if not lines:
                 text, warning = _ocr_page(page)
                 blocks.append(Block(number, tuple(stack), text, warning))
                 continue
+            if sum(len(raw.split()) for _, raw, _, _ in lines) < 20 and page.get_images():
+                # Sparse text layer over an image (scanned slide): prefer OCR when it recovers more.
+                text, _ = _ocr_page(page)
+                if len(text) > sum(len(raw) for _, raw, _, _ in lines):
+                    blocks.append(Block(number, tuple(stack), text))
+                    continue
             buffer: list[str] = []
             current = None
             for block_number, raw, size, bold in lines:
                 clean = normalize_text(raw)
                 if not clean or clean in repeated:
                     continue
-                level = heading_level(clean, size, bold, median_size, offset)
+                level = bookmarks.get(clean.casefold()) or heading_level(clean, size, bold, median_size, offset)
                 if level is not None or block_number != current:
                     _flush(blocks, number, stack, buffer)
                     current = block_number

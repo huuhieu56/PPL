@@ -53,3 +53,33 @@ def safe_upload_name(name: str) -> str:
     candidate = Path(name).name
     cleaned = "".join(character if character.isalnum() or character in "._-" else "_" for character in candidate)
     return cleaned[:160] or "document"
+
+
+def stage_uploads(uploads, root: Path) -> list[Path]:
+    """Store each upload at root/<sha256[:24]>/<name>; duplicates in one batch are dropped.
+
+    Content-addressed folders keep files with the same name apart, so a stored
+    document can be re-indexed later from its source_path.
+    """
+    paths = []
+    seen = set()
+    for upload in uploads:
+        content = upload.getvalue()
+        digest = hashlib.sha256(content).hexdigest()[:24]
+        if digest in seen:
+            continue
+        seen.add(digest)
+        path = root / digest / safe_upload_name(upload.name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        paths.append(path)
+    return paths
+
+
+def citation_label(citation: dict, filenames: dict[str, str] | None = None) -> str:
+    """DOCX has no pages (every block is page 1), so its label omits the locator."""
+    source = " > ".join([citation.get("doc_title", ""), *citation.get("heading_path", [])]).strip(" >")
+    label = f"[{citation['number']}] {source or citation['doc_id']}"
+    if (filenames or {}).get(citation["doc_id"], "").lower().endswith(".docx"):
+        return label
+    return f"{label} — trang/slide {citation['page']}"

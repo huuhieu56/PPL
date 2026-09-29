@@ -12,7 +12,7 @@ class FakePipeline:
         self.results = results
         self.queries_received = []
 
-    def run(self, query, config, use_cache=True):
+    def run(self, query, config, use_cache=True, doc_ids=None):
         self.queries_received.append(query)
         return PipelineResult(self.results, {"sparse": 1.0, "dense": 1.0, "fusion": 0.0, "rerank": 0.0, "total": 2.0})
 

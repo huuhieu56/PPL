@@ -46,6 +46,8 @@ class Database:
                 CREATE TABLE IF NOT EXISTS chat_sessions (
                     session_id TEXT PRIMARY KEY,
                     username TEXT NOT NULL,
+                    corpus_version TEXT NOT NULL DEFAULT '',
+                    scope_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE TABLE IF NOT EXISTS messages (
@@ -69,6 +71,11 @@ class Database:
                 );
                 """
             )
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(chat_sessions)")}
+            if "corpus_version" not in columns:
+                connection.execute("ALTER TABLE chat_sessions ADD COLUMN corpus_version TEXT NOT NULL DEFAULT ''")
+            if "scope_json" not in columns:
+                connection.execute("ALTER TABLE chat_sessions ADD COLUMN scope_json TEXT NOT NULL DEFAULT '[]'")
 
     def save_rag_config(self, name: str, config: PipelineConfig) -> None:
         with self._connect() as connection:
@@ -151,6 +158,18 @@ class Database:
             for row in rows
         ]
 
+    def set_document_source(self, doc_id: str, source_path: str) -> None:
+        """Remember where an uploaded file is stored so it can be re-indexed later."""
+        with self._connect() as connection:
+            row = connection.execute("SELECT metadata_json FROM documents WHERE doc_id = ?", (doc_id,)).fetchone()
+            if row is None:
+                raise KeyError(f"Unknown document: {doc_id}")
+            payload = {**json.loads(row["metadata_json"]), "source_path": source_path}
+            connection.execute(
+                "UPDATE documents SET metadata_json = ? WHERE doc_id = ?",
+                (json.dumps(payload, ensure_ascii=False), doc_id),
+            )
+
     def save_corpus_version(self, record: dict) -> None:
         version_id = record["version_id"]
         payload = {key: value for key, value in record.items() if key != "version_id"}
@@ -200,3 +219,36 @@ class Database:
                 (feedback_id, record["message_id"], json.dumps(payload, ensure_ascii=False)),
             )
         return feedback_id
+
+    def start_chat_session(self, session_id: str, username: str, corpus_version: str, doc_ids) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO chat_sessions(session_id, username, corpus_version, scope_json) VALUES (?, ?, ?, ?)",
+                (session_id, username, corpus_version, json.dumps(sorted(doc_ids))),
+            )
+
+    def list_chat_sessions(self, username: str, corpus_version: str, doc_ids) -> list[dict]:
+        """Sessions of one user for one corpus and document scope, newest first."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT session_id, created_at FROM chat_sessions
+                WHERE username = ? AND corpus_version = ? AND scope_json = ?
+                ORDER BY rowid DESC
+                """,
+                (username, corpus_version, json.dumps(sorted(doc_ids))),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def chat_turns(self, session_id: str, username: str) -> list[dict]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT m.message_id, m.payload_json FROM messages m
+                JOIN chat_sessions s ON s.session_id = m.session_id
+                WHERE m.session_id = ? AND s.username = ?
+                ORDER BY m.rowid
+                """,
+                (session_id, username),
+            ).fetchall()
+        return [{"message_id": row["message_id"], **json.loads(row["payload_json"])} for row in rows]

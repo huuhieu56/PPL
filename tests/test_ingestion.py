@@ -7,7 +7,7 @@ from pptx.util import Inches
 
 from src.chunking import chunk_blocks, split_sentences
 from src.config import load_settings
-from src.ingestion import build_corpus, extract_blocks, heading_level
+from src.ingestion import build_corpus, extract_blocks, heading_level, usable_ocr
 from src.models import Block, Chunk
 from src.storage import Database
 
@@ -77,6 +77,41 @@ def test_pdf_repeated_header_is_ignored(tmp_path):
     blocks = extract_blocks(path)
     assert [block.page for block in blocks] == [1, 2, 3, 4]
     assert all(block.heading_path == ("1.1 Mo dau",) for block in blocks)
+
+
+def test_pdf_outline_supplies_headings(tmp_path):
+    path = tmp_path / "outline.pdf"
+    document = pymupdf.open()
+    document.new_page().insert_text((72, 100), "Noi dung chuong mot.", fontsize=11)
+    page = document.new_page()
+    page.insert_text((72, 80), "Muc con", fontsize=11)
+    page.insert_text((72, 100), "Noi dung muc con.", fontsize=11)
+    document.set_toc([[1, "Chuong mot", 1], [2, "Muc con", 2]])
+    document.save(path)
+
+    blocks = extract_blocks(path)
+    assert blocks[0].heading_path == ("Chuong mot",)
+    assert blocks[-1].heading_path == ("Chuong mot", "Muc con")
+    assert blocks[-1].text == "Noi dung muc con."
+
+
+def test_pdf_two_columns_read_left_column_first(tmp_path):
+    path = tmp_path / "columns.pdf"
+    document = pymupdf.open()
+    page = document.new_page()
+    for y, left, right in ((100, "Trai mot", "Phai mot"), (114, "Trai hai", "Phai hai")):
+        page.insert_text((72, y), left, fontsize=11)
+        page.insert_text((350, y), right, fontsize=11)
+    document.save(path)
+
+    text = " ".join(block.text for block in extract_blocks(path))
+    assert text == "Trai mot Trai hai Phai mot Phai hai"
+
+
+def test_usable_ocr_rejects_diagram_noise():
+    assert usable_ocr("Cơ sở dữ liệu quan hệ lưu trữ bảng và khóa chính")
+    assert not usable_ocr("|| -- 12 [x] ~~ 3.4 >> | |")
+    assert not usable_ocr("")
 
 
 def test_pptx_title_is_heading_and_body_keeps_reading_order(tmp_path):

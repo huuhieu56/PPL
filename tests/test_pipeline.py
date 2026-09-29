@@ -102,3 +102,18 @@ def test_cache_skips_recomputation_and_can_be_bypassed(pipeline):
     pipeline.run("học máy", config, use_cache=False)
     assert pipeline.cross.pairs_seen == seen + 2
     assert pipeline.index._encoder.calls == encoder_calls + 1
+
+
+def test_doc_scope_limits_every_branch_and_rejects_unknown_docs(tmp_path):
+    index = RetrievalIndex.build(
+        [make_chunk(chunk_id, text, doc_id="doc-a" if chunk_id in ("c1", "c2") else "doc-b") for chunk_id, text in TEXTS.items()],
+        tmp_path / "idx-scope",
+        embedding_model="fake",
+        encoder=FakeEncoder(),
+    )
+    pipeline = RetrievalPipeline(index, cache=RetrievalCache(tmp_path / "cache.sqlite"), synchronize=lambda: None)
+    result = pipeline.run("cơ sở dữ liệu khóa chính", HYBRID, doc_ids=frozenset({"doc-a"}))
+    assert {item.chunk.doc_id for item in result.results} == {"doc-a"}
+    assert {item.chunk.chunk_id for item in pipeline.run("cơ sở dữ liệu khóa chính", HYBRID).results} == set(TEXTS)
+    with pytest.raises(ValueError, match="doc-z"):
+        pipeline.run("dữ liệu", HYBRID, doc_ids=frozenset({"doc-z"}))

@@ -61,3 +61,43 @@ def test_experiments_page_warns_on_lock_violation(tmp_path, monkeypatch):
     assert not app.exception
     assert any("khóa" in warning.value for warning in app.warning)
     assert any("Bảng 3.5" in block.value for block in app.markdown)
+
+
+def test_chat_page_scopes_documents_and_keeps_sessions(tmp_path, monkeypatch):
+    from src.index import RetrievalIndex
+    from tests.fakes import FakeEncoder, make_chunk
+
+    _env(tmp_path, monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_MODEL", "test-model")
+    RetrievalIndex.build(
+        [make_chunk(f"c{n}", f"nội dung {n}", doc_id=f"d{n % 2}", doc_title=f"Tài liệu {n % 2}") for n in range(4)],
+        tmp_path / "data" / "indexes" / "v1",
+        embedding_model="fake",
+        encoder=FakeEncoder(),
+    )
+    db = Database(tmp_path / "data" / "app.db")
+    db.initialize()
+    db.save_corpus_version({"version_id": "v1", "chunk_count": 4})
+    db.set_active_corpus("v1")
+
+    app = AppTest.from_file(str(PAGES / "1_Chat.py"), default_timeout=30)
+    app.session_state["user"] = {"username": "student", "role": "student"}
+    app.run()
+    assert not app.exception
+    assert app.sidebar.multiselect[0].options == ["Tài liệu 0", "Tài liệu 1"]
+    assert len(db.list_chat_sessions("student", "v1", ())) == 1
+    app.sidebar.multiselect[0].select("d1")
+    app.run()
+    assert not app.exception
+    assert len(db.list_chat_sessions("student", "v1", ("d1",))) == 1
+    assert len(db.list_chat_sessions("student", "v1", ())) == 1
+
+
+def test_documents_page_renders_without_corpus(tmp_path, monkeypatch):
+    _env(tmp_path, monkeypatch)
+    monkeypatch.chdir(PAGES.parent)
+    app = AppTest.from_file(str(PAGES / "2_Documents.py"), default_timeout=30)
+    app.session_state["user"] = {"username": "admin", "role": "admin"}
+    app.run()
+    assert not app.exception
