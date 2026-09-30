@@ -24,10 +24,10 @@ jobs:
       - run: docker build -t "ppl-rag:$GITHUB_SHA" .
 
       - name: Deploy image to VM
-        if: vars.VM_HOST != '' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        if: github.event_name != 'pull_request'
         env:
-          VM_HOST: ${{ vars.VM_HOST }}
-          VM_USER: ${{ vars.VM_USER }}
+          VM_HOST: ${{ secrets.VM_HOST }}
+          VM_USER: ${{ secrets.VM_USER }}
           VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
           APP_ENV: ${{ secrets.APP_ENV }}
         run: |
