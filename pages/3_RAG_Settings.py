@@ -23,7 +23,7 @@ with st.form("rag_config"):
     adaptive_beta = st.slider("Beta adaptive (tune trên dev)", -1.0, 1.0, 0.3, 0.05)
     rrf_k = st.number_input("RRF k", 1, 200, 60)
     threshold = st.number_input("Ngưỡng từ chối", value=0.0, format="%.4f")
-    model = st.text_input("LLM model", settings.openai_model)
+    model = st.text_input("LLM model", settings.llm_model)
     temperature = st.number_input("Temperature", 0.0, 2.0, 0.0, 0.1)
     submitted = st.form_submit_button("Lưu cấu hình", type="primary")
 if submitted:

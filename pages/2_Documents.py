@@ -6,7 +6,7 @@ import streamlit as st
 
 from src.config import load_settings, load_yaml
 from src.corpus import index_corpus
-from src.ingestion import extract_document
+from src.documents import extract_document
 from src.ui import database, require_role, stage_uploads
 
 

@@ -1,19 +1,16 @@
-import csv
 import json
 from dataclasses import replace
 from types import SimpleNamespace
 
-import pytest
-import yaml
 from pptx import Presentation
 from pptx.util import Inches
 from docx import Document
 import pymupdf
 
 from src.config import load_settings
-from src.evaluation import evaluate_rankings, paired_bootstrap_ci
-from src.experiments import run_experiment, validate_config, select_queries
-from src.ingestion import PageText, build_corpus, chunk_pages, extract_document, usable_ocr
+from src.chunking import build_hierarchy
+from src.corpus import build_corpus
+from src.documents import PageText, extract_document, usable_ocr
 from src.models import Chunk, RagConfig, SearchResult
 from src.rag import answer_question
 from src.reranking import _load_model
@@ -124,7 +121,7 @@ def test_ingestion_preserves_source_and_reading_order(tmp_path):
     assert pages[0].text.index("Bài 1") < pages[0].text.index("Nội dung bên trái")
     assert pages[0].text.index("Nội dung bên trái") < pages[0].text.index("Nội dung bên phải")
 
-    chunks = chunk_pages(
+    chunks, _ = build_hierarchy(
         pages,
         doc_id="doc-1",
         course="AI101",
@@ -167,7 +164,7 @@ def test_hierarchical_chunks_keep_slide_sources_separate_with_shared_section():
         PageText(2, "GIAO DỊCH (Cont.)", "GIAO DỊCH (Cont.)\nTính nhất quán."),
         PageText(3, "CHỈ MỤC", "CHỈ MỤC\nCấu trúc B-tree."),
     ]
-    chunks = chunk_pages(pages, doc_id="d", course="CSDL", source_type="slide", chunk_tokens=30, overlap_tokens=5)
+    chunks, _ = build_hierarchy(pages, doc_id="d", course="CSDL", source_type="slide", chunk_tokens=30, overlap_tokens=5)
     assert len(chunks) == 3
     assert [(chunk.page, chunk.page_end) for chunk in chunks] == [(1, 1), (2, 2), (3, 3)]
     assert [chunk.section for chunk in chunks] == ["GIAO DỊCH", "GIAO DỊCH", "CHỈ MỤC"]
@@ -179,7 +176,7 @@ def test_chunk_citations_cover_only_pages_in_each_window():
         PageText(1, "Bài 1", "một hai ba bốn năm sáu"),
         PageText(2, "Bài 1", "bảy tám chín mười mười_một mười_hai"),
     ]
-    chunks = chunk_pages(pages, doc_id="d", course="M", source_type="slide", chunk_tokens=8, overlap_tokens=2)
+    chunks, _ = build_hierarchy(pages, doc_id="d", course="M", source_type="slide", chunk_tokens=8, overlap_tokens=2)
     assert (chunks[0].page, chunks[0].page_end) == (1, 1)
     assert (chunks[1].page, chunks[1].page_end) == (2, 2)
     assert (chunks[-1].page, chunks[-1].page_end) == (2, 2)
@@ -201,7 +198,7 @@ def test_docx_headings_and_tables_keep_reading_order(tmp_path):
     assert [block.text for block in blocks] == ["Định nghĩa ban đầu", "Khái niệm | Giải thích", "Định nghĩa tiếp theo"]
     assert [block.page for block in blocks] == [1, 2, 3]
     assert [block.section for block in blocks] == ["Chương 1", "Chương 1", "Chương 1 > Mục 1.1"]
-    chunks = chunk_pages(blocks, doc_id="d", course="Lịch sử", source_type="docx", chunk_tokens=50, overlap_tokens=5)
+    chunks, _ = build_hierarchy(blocks, doc_id="d", course="Lịch sử", source_type="docx", chunk_tokens=50, overlap_tokens=5)
     assert "[Đoạn 1]" in chunks[0].text
     assert "[Trang" not in chunks[0].text
 
@@ -244,7 +241,7 @@ def test_pdf_without_outline_does_not_invent_section_from_first_line(tmp_path):
     document.save(path)
     document.close()
     assert extract_document(path)[0].section == ""
-    chunks = chunk_pages(extract_document(path), doc_id="d", course="M", source_type="textbook", chunk_tokens=50, overlap_tokens=5)
+    chunks, _ = build_hierarchy(extract_document(path), doc_id="d", course="M", source_type="textbook", chunk_tokens=50, overlap_tokens=5)
     assert chunks[0].section == ""
 
 
@@ -253,7 +250,7 @@ def test_ocr_quality_gate_rejects_diagram_noise():
     assert not usable_ocr("⁄⁄ ey ¬ VA / Z ⁄ ⁄/ ‚/ LZ ⁄ \\ 7 + WIM p47 /,j ¢)")
 
 
-def test_retrieval_fusion_and_metrics(monkeypatch):
+def test_retrieval_fusion_and_grounded_answer(monkeypatch):
     chunks = {
         "c1": Chunk("c1", "d1", "AI101", "slide", 1, "Mã môn", "Mã môn AI101"),
         "c2": Chunk("c2", "d1", "AI101", "slide", 2, "Khái niệm", "Giải thích học máy"),
@@ -276,14 +273,6 @@ def test_retrieval_fusion_and_metrics(monkeypatch):
         alpha=0.7,
     )
     assert fused[0].chunk.chunk_id == "c1"
-
-    metrics = evaluate_rankings(
-        rankings={"q1": ["c1", "c2"]},
-        qrels={"q1": {"c1": 2}},
-        ks=(1, 10),
-    )
-    assert metrics["hit_rate@1"] == 1.0
-    assert metrics["mrr@10"] == 1.0
 
     monkeypatch.setattr("src.rag.retrieve", lambda query, index, config: fused)
 
@@ -322,11 +311,6 @@ def test_retrieval_fusion_and_metrics(monkeypatch):
     assert completions.calls == 1
 
 
-def test_paired_bootstrap_ci_for_constant_gain():
-    assert paired_bootstrap_ci([1, 1, 1], [0, 0, 0], samples=100) == (1.0, 1.0)
-    assert paired_bootstrap_ci([1, 1, 1], [0, 0, 0], groups=["book-a", "book-a", "book-b"], samples=100) == (1.0, 1.0)
-
-
 def test_single_retrievers_do_not_run_the_other_model():
     chunk = Chunk("c1", "d1", "CSDL", "slide", 1, "", "Cơ sở dữ liệu")
 
@@ -347,138 +331,3 @@ def test_single_retrievers_do_not_run_the_other_model():
     index.dense_scores = lambda *args: {"c1": 0.9}
     index.sparse_scores = lambda *args: (_ for _ in ()).throw(AssertionError("bm25 called"))
     assert retrieve("Cơ sở dữ liệu", index, RagConfig(method="dense", top_l=10))[0].chunk.chunk_id == "c1"
-
-
-def test_experiment_run_resumes_without_repeating_completed_queries(tmp_path, monkeypatch):
-    queries = tmp_path / "queries.jsonl"
-    queries.write_text(
-        "\n".join(json.dumps({"query_id": query, "text": query, "split": "dev"}) for query in ["q1", "q2"]),
-        encoding="utf-8",
-    )
-    qrels = tmp_path / "qrels.jsonl"
-    qrels.write_text(
-        "\n".join(
-            json.dumps({"query_id": query, "chunk_id": "c1", "relevance": 2})
-            for query in ["q1", "q2"]
-        ),
-        encoding="utf-8",
-    )
-    config_path = tmp_path / "experiment.yaml"
-    index_dir = tmp_path / "fixture"
-    index_dir.mkdir()
-    (index_dir / "chunks.jsonl").write_text('{"chunk_id":"c1"}\n')
-    config_path.write_text(
-        yaml.safe_dump(
-            {
-                "runs_dir": str(tmp_path / "runs"),
-                "queries": str(queries),
-                "qrels": str(qrels),
-                "corpus_version": "fixture",
-                "index_dir": str(index_dir),
-                "experiments": {"E0": {"method": "bm25", "use_reranker": False}},
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    calls = []
-    interrupted = {"value": False}
-
-    def fake_execute_query(experiment_id, query, config):
-        calls.append(query["query_id"])
-        if query["query_id"] == "q2" and not interrupted["value"]:
-            interrupted["value"] = True
-            raise KeyboardInterrupt
-        return {"ranked_chunk_ids": ["c1"], "latency_ms": 1.0}
-
-    monkeypatch.setattr("src.experiments.execute_query", fake_execute_query)
-    with pytest.raises(KeyboardInterrupt):
-        run_experiment(config_path)
-
-    run_dir = next((tmp_path / "runs").iterdir())
-    run_experiment(config_path, resume_run_id=run_dir.name)
-    with (run_dir / "per_query.csv").open(encoding="utf-8") as stream:
-        rows = list(csv.DictReader(stream))
-    assert calls.count("q1") == 1
-    assert {row["query_id"] for row in rows} == {"q1", "q2"}
-
-
-def test_failed_experiment_query_is_not_reported_as_completed(tmp_path, monkeypatch):
-    queries = tmp_path / "queries.jsonl"
-    queries.write_text('{"query_id":"q1","text":"one","split":"dev"}\n{"query_id":"q2","text":"two","split":"dev"}\n')
-    qrels = tmp_path / "qrels.jsonl"
-    qrels.write_text('{"query_id":"q1","chunk_id":"c1","relevance":2}\n{"query_id":"q2","chunk_id":"c1","relevance":2}\n')
-    config_path = tmp_path / "config.yaml"
-    index_dir = tmp_path / "fixture"
-    index_dir.mkdir()
-    (index_dir / "chunks.jsonl").write_text('{"chunk_id":"c1"}\n')
-    config_path.write_text(yaml.safe_dump({"runs_dir": str(tmp_path / "runs"), "queries": str(queries), "qrels": str(qrels), "corpus_version": "fixture", "index_dir": str(index_dir), "experiments": {"E0": {"method": "bm25"}}}))
-
-    def execute(_experiment_id, query, _config):
-        if query["query_id"] == "q2":
-            raise ValueError("broken")
-        return {"ranked_chunk_ids": ["c1"], "latency_ms": 1.0}
-
-    monkeypatch.setattr("src.experiments.execute_query", execute)
-    run_dir = run_experiment(config_path)
-    assert json.loads((run_dir / "status.json").read_text())["status"] == "partial"
-    assert not (run_dir / "metrics.json").exists()
-
-
-def test_resume_rejects_changed_benchmark_before_overwriting_run(tmp_path):
-    queries = tmp_path / "queries.jsonl"
-    queries.write_text('{"query_id":"q1","text":"original","split":"dev"}\n')
-    qrels = tmp_path / "qrels.jsonl"
-    qrels.write_text('{"query_id":"q1","chunk_id":"c1","relevance":2}\n')
-    index_dir = tmp_path / "fixture"
-    index_dir.mkdir()
-    (index_dir / "chunks.jsonl").write_text('{"chunk_id":"c1"}\n')
-    config = {"runs_dir": str(tmp_path / "runs"), "queries": str(queries), "qrels": str(qrels), "corpus_version": "fixture", "index_dir": str(index_dir), "experiments": {"E0": {"method": "bm25"}}}
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(yaml.safe_dump(config))
-    run_dir = tmp_path / "runs" / "old"
-    run_dir.mkdir(parents=True)
-    (run_dir / "config.json").write_text(json.dumps({**config, "experiments": {"E0": {"method": "dense"}}}))
-    before = (run_dir / "config.json").read_bytes()
-    with pytest.raises(ValueError, match="frozen|changed|resume"):
-        run_experiment(config_path, resume_run_id="old")
-    assert (run_dir / "config.json").read_bytes() == before
-
-
-def test_local_experiment_never_mixes_dev_and_test(tmp_path):
-    queries = tmp_path / "queries.jsonl"
-    queries.write_text('{"query_id":"dev1","text":"one","split":"dev"}\n{"query_id":"test1","text":"two","split":"test"}\n')
-    assert [row["query_id"] for row in select_queries(queries, "dev")] == ["dev1"]
-    assert [row["query_id"] for row in select_queries(queries, "test")] == ["test1"]
-    queries.write_text('{"query_id":"missing","text":"unlabelled"}\n')
-    with pytest.raises(ValueError, match="split"):
-        select_queries(queries, "dev")
-    queries.write_text('{"query_id":"q1","text":"One","split":"dev","group_id":"book-1"}\n{"query_id":"q2","text":"two","split":"test","group_id":"book-1"}\n')
-    with pytest.raises(ValueError, match="leaks"):
-        select_queries(queries, "dev")
-
-
-def test_benchmark_rejects_qrels_from_another_corpus(tmp_path):
-    queries = tmp_path / "queries.jsonl"
-    queries.write_text('{"query_id":"q1","text":"what"}\n')
-    qrels = tmp_path / "qrels.jsonl"
-    qrels.write_text('{"query_id":"q1","chunk_id":"from-other-corpus","relevance":2}\n')
-    index_dir = tmp_path / "fixture"
-    index_dir.mkdir()
-    (index_dir / "chunks.jsonl").write_text('{"chunk_id":"c1"}\n')
-    config = {"queries": str(queries), "qrels": str(qrels), "corpus_version": "fixture", "index_dir": str(index_dir), "experiments": {"E0": {"method": "bm25"}}}
-    with pytest.raises(ValueError, match="unknown chunk"):
-        validate_config(config, require_index=True)
-
-
-def test_retrieval_metrics_require_a_positive_qrel_for_every_query(tmp_path):
-    queries = tmp_path / "queries.jsonl"
-    queries.write_text('{"query_id":"q1","text":"what"}\n{"query_id":"q2","text":"why"}\n')
-    qrels = tmp_path / "qrels.jsonl"
-    qrels.write_text('{"query_id":"q1","chunk_id":"c1","relevance":2}\n')
-    index_dir = tmp_path / "fixture"
-    index_dir.mkdir()
-    (index_dir / "chunks.jsonl").write_text('{"chunk_id":"c1"}\n')
-    config = {"queries": str(queries), "qrels": str(qrels), "corpus_version": "fixture", "index_dir": str(index_dir), "experiments": {"E0": {"method": "bm25"}}}
-    with pytest.raises(ValueError, match="missing positive qrels"):
-        validate_config(config, require_index=True)

@@ -3,11 +3,11 @@ import time
 from dataclasses import dataclass, replace
 
 from langchain_openai import ChatOpenAI
-from langsmith import traceable
 
 from src.models import RagConfig
 from src.reranking import rerank
-from src.retrieval import RetrievalIndex, retrieve
+from src.index import RetrievalIndex
+from src.retrieval import retrieve
 
 
 REFUSAL_TEXT = "Không tìm thấy đủ thông tin trong tài liệu để trả lời câu hỏi này."
@@ -15,8 +15,8 @@ REFUSAL_TEXT = "Không tìm thấy đủ thông tin trong tài liệu để tr�
 
 def chat_model(settings, model: str | None = None):
     return ChatOpenAI(
-        api_key=settings.openai_api_key, base_url=settings.openai_base_url,
-        model=model or settings.openai_model, timeout=60, max_retries=2,
+        api_key=settings.llm_api_key, base_url=settings.llm_base_url,
+        model=model or settings.llm_model, timeout=60, max_retries=2,
         temperature=0, use_responses_api=False,
     )
 
@@ -85,7 +85,6 @@ def _valid_citations(text: str, results) -> tuple[str, list[dict]]:
     return re.sub(r"\s+([.,;:])", r"\1", cleaned), cited
 
 
-@traceable(name="learning_rag", run_type="chain", process_inputs=lambda values: {key: values[key] for key in ("query", "rag_config", "model", "history") if key in values})
 def answer_question(
     query: str,
     index: RetrievalIndex,

@@ -4,7 +4,9 @@ from types import SimpleNamespace
 import pymupdf
 import pytest
 
-from src.ingestion import PageText, build_hierarchy, extract_document, build_corpus
+from src.chunking import build_hierarchy
+from src.corpus import build_corpus
+from src.documents import PageText, extract_document
 from src.config import load_settings
 from src.storage import Database
 from src.ui import citation_label, stage_uploads

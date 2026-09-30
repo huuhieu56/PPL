@@ -6,7 +6,7 @@ import streamlit as st
 from src.config import load_settings
 from src.models import RagConfig
 from src.rag import answer_question, chat_model
-from src.retrieval import RetrievalIndex
+from src.index import RetrievalIndex
 from src.ui import citation_label, database, require_role
 
 
@@ -22,8 +22,8 @@ st.caption("Hỏi theo nội dung học liệu. Mở dẫn nguồn dưới câu 
 if not active:
     st.info("Chưa có kho tài liệu đang hoạt động. Quản trị viên cần lập chỉ mục trước.")
     st.stop()
-if not settings.openai_api_key or not settings.openai_model:
-    st.error("Thiếu OPENAI_API_KEY hoặc OPENAI_MODEL trong .env.")
+if not settings.llm_api_key or not settings.llm_model:
+    st.error("Thiếu LLM_API_KEY hoặc LLM_MODEL trong .env.")
     st.stop()
 
 
@@ -41,8 +41,8 @@ except Exception:
 saved_configs = db.list_rag_configs()
 config_by_name = {item["name"]: RagConfig(**item["config"]) for item in saved_configs}
 config_name = st.sidebar.selectbox("Cấu hình RAG", list(config_by_name) or ["Mặc định"])
-config = config_by_name.get(config_name, RagConfig(model=settings.openai_model))
-client = chat_model(settings, config.model or settings.openai_model)
+config = config_by_name.get(config_name, RagConfig(model=settings.llm_model))
+client = chat_model(settings, config.model or settings.llm_model)
 
 available_docs = sorted({chunk.doc_id for chunk in index.chunks.values()}, key=lambda key: document_names.get(key, key))
 saved_scope = st.session_state.get("chat_document_scope", {})
@@ -89,7 +89,7 @@ if query := st.chat_input("Nhập câu hỏi về tài liệu..."):
         with st.spinner("Đang tìm tài liệu và tạo câu trả lời..."):
             try:
                 answer = answer_question(
-                    query, index, config, client, config.model or settings.openai_model,
+                    query, index, config, client, config.model or settings.llm_model,
                     history=turns,
                 )
             except Exception:

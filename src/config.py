@@ -10,28 +10,24 @@ from dotenv import load_dotenv
 class Settings:
     root: Path
     data_dir: Path
-    runs_dir: Path
     db_path: Path
-    openai_api_key: str = field(repr=False)
-    openai_base_url: str
-    openai_model: str
+    llm_api_key: str = field(repr=False)
+    llm_base_url: str
+    llm_model: str
 
 
 def load_settings(root: Path | None = None) -> Settings:
     load_dotenv()
     project_root = Path(root or Path.cwd()).resolve()
     data_dir = project_root / "data"
-    runs_dir = project_root / "runs"
     data_dir.mkdir(parents=True, exist_ok=True)
-    runs_dir.mkdir(parents=True, exist_ok=True)
     return Settings(
         root=project_root,
         data_dir=data_dir,
-        runs_dir=runs_dir,
         db_path=data_dir / "app.db",
-        openai_api_key=os.getenv("OPENAI_API_KEY", ""),
-        openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-        openai_model=os.getenv("OPENAI_MODEL", ""),
+        llm_api_key=os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY", ""),
+        llm_base_url=os.getenv("LLM_BASE_URL") or os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+        llm_model=os.getenv("LLM_MODEL") or os.getenv("OPENAI_MODEL", ""),
     )
 
 

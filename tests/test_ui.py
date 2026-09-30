@@ -9,7 +9,7 @@ from src.storage import Database
 from src.ui import citation_label
 
 
-@pytest.mark.parametrize("page", ["2_Documents.py", "3_RAG_Settings.py", "4_Experiments.py"])
+@pytest.mark.parametrize("page", ["2_Documents.py", "3_RAG_Settings.py"])
 def test_student_cannot_execute_admin_page_even_without_navigation(page):
     app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "pages" / page))
     app.session_state["user"] = {"username": "student", "role": "student"}
@@ -26,7 +26,7 @@ def test_citation_uses_readable_source_name():
 
 
 def test_chat_does_not_prompt_for_feedback_by_default(tmp_path, monkeypatch):
-    settings = replace(load_settings(tmp_path), openai_api_key="test-key", openai_model="test-model")
+    settings = replace(load_settings(tmp_path), llm_api_key="test-key", llm_model="test-model")
     db = Database(settings.db_path)
     db.initialize()
     db.publish_corpus([], {"version_id": "test-corpus"})
@@ -35,7 +35,7 @@ def test_chat_does_not_prompt_for_feedback_by_default(tmp_path, monkeypatch):
     monkeypatch.setattr("src.config.load_settings", lambda: settings)
     monkeypatch.setattr("src.ui.load_settings", lambda: settings)
     from types import SimpleNamespace
-    monkeypatch.setattr("src.retrieval.RetrievalIndex.load", lambda path: SimpleNamespace(chunks={}))
+    monkeypatch.setattr("src.index.RetrievalIndex.load", lambda path: SimpleNamespace(chunks={}))
     app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"))
     app.session_state["user"] = {"username": "test", "role": "student"}
     app.run(timeout=30).switch_page("pages/1_Chat.py").run(timeout=30)
@@ -43,26 +43,6 @@ def test_chat_does_not_prompt_for_feedback_by_default(tmp_path, monkeypatch):
     assert len(app.radio) == 0
     app.button(key="feedback-m1").click().run(timeout=30)
     assert len(app.radio) == 1
-
-
-def test_experiments_page_displays_public_benchmark_metrics(tmp_path, monkeypatch):
-    settings = load_settings(tmp_path)
-    run_dir = settings.runs_dir / "public-benchmark"
-    run_dir.mkdir()
-    results = json.dumps({"source": "mteb/VieQuADRetrieval", "chosen": "alpha_0.25", "dev_query_ids": ["q1"], "test_query_ids": ["q2"], "test": {"dense": {"ndcg@10": 0.5, "mrr@10": 0.6, "hit_rate@1": 0.4}, "alpha_0.25": {"ndcg@10": 0.6, "mrr@10": 0.7, "hit_rate@1": 0.5}}})
-    (run_dir / "results.json").write_text(results)
-    (run_dir / "per_query.jsonl").write_text("{}\n")
-    second_run = settings.runs_dir / "second-benchmark"
-    second_run.mkdir()
-    (second_run / "results.json").write_text(results)
-    (second_run / "per_query.jsonl").write_text("{}\n")
-    monkeypatch.setattr("src.config.load_settings", lambda: settings)
-    monkeypatch.setattr("src.ui.load_settings", lambda: settings)
-    app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"))
-    app.session_state["user"] = {"username": "admin", "role": "admin"}
-    app.run(timeout=30).switch_page("pages/4_Experiments.py").run(timeout=30)
-    assert not app.exception
-    assert len(app.dataframe) == 2
 
 
 def test_rag_settings_exposes_parent_context_budget(tmp_path, monkeypatch):
@@ -108,7 +88,7 @@ def test_overview_counts_active_manifest_not_historical_registry(tmp_path, monke
 
 def test_document_scope_survives_leaving_chat(tmp_path, monkeypatch):
     from types import SimpleNamespace
-    settings = replace(load_settings(tmp_path), openai_api_key="test-key", openai_model="test-model")
+    settings = replace(load_settings(tmp_path), llm_api_key="test-key", llm_model="test-model")
     db = Database(settings.db_path)
     db.initialize()
     db.publish_corpus([], {"version_id":"scope-navigation"})
@@ -116,7 +96,7 @@ def test_document_scope_survives_leaving_chat(tmp_path, monkeypatch):
     index.scoped = lambda _ids: index
     monkeypatch.setattr("src.config.load_settings", lambda: settings)
     monkeypatch.setattr("src.ui.load_settings", lambda: settings)
-    monkeypatch.setattr("src.retrieval.RetrievalIndex.load", lambda _path: index)
+    monkeypatch.setattr("src.index.RetrievalIndex.load", lambda _path: index)
     app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"))
     app.session_state["user"] = {"username":"admin", "role":"admin"}
     app.run().switch_page("pages/1_Chat.py").run()

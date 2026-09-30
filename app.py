@@ -17,7 +17,7 @@ def login():
         st.caption("HỌC LIỆU · KHÔNG GIAN HỌC TẬP")
         st.title("Học từ tài liệu.\nKiểm tra từ nguồn.")
         st.write("Hỏi đáp sách, giáo trình và bài giảng. Mỗi câu trả lời dựa trên học liệu đều có dẫn nguồn để bạn đối chiếu.")
-        st.caption("Hệ thống demo/nghiên cứu chạy trên máy cá nhân. Không thay thế việc đọc và kiểm chứng tài liệu.")
+        st.caption("Hệ thống demo/nghiên cứu. Không thay thế việc đọc và kiểm chứng tài liệu.")
     with form:
         st.subheader("Đăng nhập")
         with st.form("login"):
@@ -50,7 +50,7 @@ def overview():
     counts[1].metric("Môn học", len({document["course"] for document in documents}))
     counts[2].metric("Đoạn được lập chỉ mục", active.get("chunk_count", 0))
     st.page_link("pages/1_Chat.py", label="Mở hỏi đáp tài liệu", icon=":material/chat:")
-    st.caption("Điểm truy xuất trong thực nghiệm không đồng nghĩa độ đúng của mọi câu trả lời. Luôn mở dẫn nguồn để kiểm tra.")
+    st.caption("Luôn mở dẫn nguồn để kiểm tra câu trả lời.")
 
 
 user = st.session_state.get("user")
@@ -64,10 +64,9 @@ pages = {"Học tập": [
     st.Page(overview if user else login, title="Tổng quan" if user else "Đăng nhập", icon=":material/home:", default=True),
     st.Page("pages/1_Chat.py", title="Hỏi đáp", icon=":material/chat:", url_path="Chat", visibility="visible" if user else "hidden"),
 ]}
-pages["Quản trị & nghiên cứu"] = [
+pages["Quản trị"] = [
     st.Page("pages/2_Documents.py", title="Tài liệu", icon=":material/library_books:", url_path="Documents", visibility="visible" if user and user["role"] == "admin" else "hidden"),
     st.Page("pages/3_RAG_Settings.py", title="Cấu hình truy xuất", icon=":material/tune:", url_path="RAG_Settings", visibility="visible" if user and user["role"] == "admin" else "hidden"),
-    st.Page("pages/4_Experiments.py", title="Thực nghiệm", icon=":material/analytics:", url_path="Experiments", visibility="visible" if user and user["role"] == "admin" else "hidden"),
 ]
 st.session_state.home_page = pages["Học tập"][0]
 navigation = st.navigation(pages, position="sidebar" if user else "hidden")

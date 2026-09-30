@@ -15,8 +15,8 @@ data/processed/
 data/indexes/
 data/qdrant/
 data/external/
+data/benchmark/
 runs/
-configs/generated_experiment.yaml
 
 # Local model caches and databases
 .cache/

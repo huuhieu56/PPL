@@ -4,9 +4,12 @@ from types import SimpleNamespace
 import pytest
 from qdrant_client import QdrantClient
 
-from src.ingestion import PageText, build_hierarchy
+from src.chunking import build_hierarchy
+from src.documents import PageText
 from src.models import Chunk, RagConfig
-from src.retrieval import RetrievalIndex, load_encoder, minmax_scores
+from src.embeddings import load_encoder
+from src.index import RetrievalIndex
+from src.retrieval import minmax_scores
 
 
 @pytest.fixture(autouse=True)
@@ -46,6 +49,8 @@ def test_qdrant_index_persists_searchable_chunks_without_numpy_file(tmp_path, mo
     RetrievalIndex.build(chunks, index_dir, "whitespace", "test-model", qdrant_client=client)
     index = RetrievalIndex.load(index_dir, qdrant_client=client)
     assert not (index_dir / "embeddings.npy").exists()
+    points, _ = client.scroll(index.collection, limit=1)
+    assert set(points[0].payload) == {"chunk_id", "doc_id"}
     assert index.dense_scores("định nghĩa", 2)["c1"] > index.dense_scores("định nghĩa", 2)["c2"]
     assert index.sparse_scores("không tồn tại", 2) == {}
     scoped = index.scoped(("d2",))
@@ -57,8 +62,42 @@ def test_qdrant_index_persists_searchable_chunks_without_numpy_file(tmp_path, mo
     with pytest.raises(ValueError, match="not in this index"):
         index.scoped(("missing",))
     meta = json.loads((index_dir / "index_meta.json").read_text())
-    assert meta["backend"] == "qdrant"
+    assert meta["embedding_config"]["model"] == "test-model"
     assert "embedding_revision" in meta
+
+
+def test_api_embeddings_used_for_build_and_query(tmp_path, monkeypatch):
+    calls = []
+
+    class APIEmbeddings:
+        def __init__(self, **kwargs):
+            calls.append(("init", kwargs))
+
+        def embed_documents(self, texts):
+            calls.append(("documents", texts))
+            return [[1.0, 0.0] if "toán" in text else [0.0, 1.0] for text in texts]
+
+        def embed_query(self, text):
+            calls.append(("query", text))
+            return [1.0, 0.0]
+
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "api")
+    monkeypatch.setenv("EMBEDDING_MODEL", "api-model")
+    monkeypatch.setenv("EMBEDDING_API_KEY", "example-secret")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "https://embeddings.example/v1")
+    monkeypatch.setattr("langchain_openai.OpenAIEmbeddings", APIEmbeddings)
+    chunks = [Chunk("c1", "d1", "Toán", "slide", 1, "", "toán học")]
+    client = QdrantClient(":memory:")
+    path = tmp_path / "remote"
+    RetrievalIndex.build(chunks, path, "whitespace", "api-model", qdrant_client=client)
+    index = RetrievalIndex.load(path, qdrant_client=client)
+    assert index.dense_scores("định nghĩa", 1)["c1"] > 0
+    assert ("documents", ["toán học"]) in calls
+    assert ("query", "định nghĩa") in calls
+    assert any(item[0] == "init" and item[1]["api_key"] == "example-secret" for item in calls)
+    monkeypatch.setenv("EMBEDDING_MODEL", "different-model")
+    with pytest.raises(ValueError, match="Embedding configuration"):
+        RetrievalIndex.load(path, qdrant_client=client)
 
 
 def test_all_zero_scores_do_not_become_positive():
@@ -184,7 +223,7 @@ def test_failed_upsert_removes_partial_index_and_collection(tmp_path, monkeypatc
         def encode(self, texts, **kwargs):
             return [[1.0, 0.0] for _ in texts]
 
-    monkeypatch.setattr("src.retrieval.load_encoder", lambda *_: Encoder())
+    monkeypatch.setattr("src.embeddings.load_encoder", lambda *_: Encoder())
     client = QdrantClient(":memory:")
 
     def fail_upsert(*args, **kwargs):

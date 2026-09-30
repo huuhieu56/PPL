@@ -47,6 +47,7 @@ class Database:
                     session_id TEXT PRIMARY KEY,
                     username TEXT NOT NULL,
                     corpus_version TEXT NOT NULL DEFAULT '',
+                    scope_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE TABLE IF NOT EXISTS messages (
@@ -63,11 +64,6 @@ class Database:
                 );
                 """
             )
-            columns = {row[1] for row in connection.execute("PRAGMA table_info(chat_sessions)")}
-            if "corpus_version" not in columns:
-                connection.execute("ALTER TABLE chat_sessions ADD COLUMN corpus_version TEXT NOT NULL DEFAULT ''")
-            if "scope_json" not in columns:
-                connection.execute("ALTER TABLE chat_sessions ADD COLUMN scope_json TEXT NOT NULL DEFAULT '[]'")
 
     def start_chat_session(self, session_id: str, username: str, corpus_version: str, doc_ids: tuple[str, ...] = ()) -> None:
         with self._connect() as connection:

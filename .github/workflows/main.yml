@@ -11,9 +11,8 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  test-build-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -22,32 +21,28 @@ jobs:
       - run: python -m pip install uv
       - run: uv pip install --system --torch-backend cpu -r requirements.txt
       - run: python -m pytest -q
+      - run: docker build -t "ppl-rag:$GITHUB_SHA" .
 
-  deploy:
-    needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - uses: actions/checkout@v5
-      - name: Configure SSH
-        env:
-          SSH_KEY: ${{ secrets.VM_SSH_KEY }}
-          KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
-      - name: Copy tracked source and restart app
+      - name: Deploy image to VM
+        if: vars.VM_HOST != '' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         env:
           VM_HOST: ${{ vars.VM_HOST }}
           VM_USER: ${{ vars.VM_USER }}
+          VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+          APP_ENV: ${{ secrets.APP_ENV }}
         run: |
-          git archive HEAD | ssh -o StrictHostKeyChecking=yes "$VM_USER@$VM_HOST" 'tar -xf - -C /opt/ppl-rag'
-          ssh -o StrictHostKeyChecking=yes "$VM_USER@$VM_HOST" 'test -f /opt/ppl-rag/.env && sudo -n systemctl restart ppl-rag && sudo -n systemctl is-active --quiet ppl-rag'
-      - name: Verify HTTPS health
-        env:
-          APP_DOMAIN: ${{ vars.APP_DOMAIN }}
-        run: curl --fail --show-error --silent --retry 10 --retry-delay 3 --retry-connrefused "https://$APP_DOMAIN/_stcore/health"
+          set -euo pipefail
+          : "${VM_HOST:?Set VM_HOST}" "${VM_USER:?Set VM_USER}" "${VM_SSH_KEY:?Set VM_SSH_KEY}" "${APP_ENV:?Set APP_ENV}"
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$VM_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          docker save "ppl-rag:$GITHUB_SHA" | gzip -1 > "ppl-rag-image-$GITHUB_SHA.tar.gz"
+          scp -o StrictHostKeyChecking=accept-new compose.yaml Caddyfile "ppl-rag-image-$GITHUB_SHA.tar.gz" "$VM_USER@$VM_HOST:/opt/ppl-rag/"
+          printf '%s\n' "$APP_ENV" | ssh "$VM_USER@$VM_HOST" 'umask 077; cat > /opt/ppl-rag/.env.next && mv -f /opt/ppl-rag/.env.next /opt/ppl-rag/.env'
+          ssh "$VM_USER@$VM_HOST" "IMAGE_TAG=$GITHUB_SHA sh -se" <<'REMOTE'
+          cd /opt/ppl-rag
+          docker load -i "ppl-rag-image-$IMAGE_TAG.tar.gz"
+          rm -f "ppl-rag-image-$IMAGE_TAG.tar.gz"
+          docker compose -p ppl-rag up -d --no-build --remove-orphans
+          docker compose -p ppl-rag ps
+          REMOTE
