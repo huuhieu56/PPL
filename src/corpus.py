@@ -36,9 +36,11 @@ def build_corpus(
     cached_records: dict[str, dict] = {}
     cached_chunks: dict[str, list[Chunk]] = {}
     cached_nodes: dict[str, list[dict]] = {}
+    previous_chunking = ""
     if previous_dir and (previous_dir / "manifest.json").is_file():
         previous = json.loads((previous_dir / "manifest.json").read_text(encoding="utf-8"))
-        if previous.get("config") == config and previous.get("chunking") == "hierarchical-v7":
+        previous_chunking = previous.get("chunking", "")
+        if previous.get("config") == config and previous_chunking in {"hierarchical-v8", "hierarchical-v9", "hierarchical-v10"}:
             cached_records = {item["doc_id"]: item for item in previous["documents"]}
             for line in (previous_dir / "chunks.jsonl").read_text(encoding="utf-8").splitlines():
                 chunk = Chunk(**json.loads(line))
@@ -59,7 +61,8 @@ def build_corpus(
             "sha256": file_hash,
             **item_metadata,
         }
-        if cached_records.get(doc_id) == record and cached_chunks.get(doc_id) and cached_nodes.get(doc_id):
+        unchanged_parser = (previous_chunking == "hierarchical-v10" or previous_chunking == "hierarchical-v9" and path.suffix.lower() != ".pptx" or previous_chunking == "hierarchical-v8" and path.suffix.lower() == ".docx")
+        if cached_records.get(doc_id) == record and cached_chunks.get(doc_id) and cached_nodes.get(doc_id) and unchanged_parser:
             chunks, nodes = cached_chunks[doc_id], cached_nodes[doc_id]
         else:
             pages = extract_document(path)
@@ -79,7 +82,7 @@ def build_corpus(
         all_nodes.extend(nodes)
         manifest_items.append(record)
 
-    manifest = {"documents": manifest_items, "config": config, "chunking": "hierarchical-v7"}
+    manifest = {"documents": manifest_items, "config": config, "chunking": "hierarchical-v10"}
     if index_identity is not None:
         manifest["index_identity"] = index_identity
     manifest_json = json.dumps(manifest, ensure_ascii=False, sort_keys=True)

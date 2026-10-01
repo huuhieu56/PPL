@@ -3,12 +3,15 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 from pptx import Presentation
-from pptx.util import Inches
+from pptx.util import Inches, Pt
 from docx import Document
+from docx.enum.style import WD_STYLE_TYPE
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 import pymupdf
 
 from src.config import load_settings
-from src.chunking import build_hierarchy
+from src.chunking import build_hierarchy, validate_hierarchy
 from src.corpus import build_corpus
 from src.documents import PageText, extract_document, usable_ocr
 from src.models import Chunk, RagConfig, SearchResult
@@ -118,6 +121,7 @@ def test_ingestion_preserves_source_and_reading_order(tmp_path):
     deck.save(path)
 
     pages = extract_document(path)
+    assert pages[0].section == "Bài 1"
     assert pages[0].text.index("Bài 1") < pages[0].text.index("Nội dung bên trái")
     assert pages[0].text.index("Nội dung bên trái") < pages[0].text.index("Nội dung bên phải")
 
@@ -158,6 +162,26 @@ def test_ingestion_preserves_source_and_reading_order(tmp_path):
     ).version_id == result.version_id
 
 
+def test_pptx_custom_textbox_title_and_slide_boundary(tmp_path):
+    path = tmp_path / "custom.pptx"
+    deck = Presentation()
+    for number in (1, 2):
+        slide = deck.slides.add_slide(deck.slide_layouts[6])
+        heading = slide.shapes.add_textbox(Inches(1), Inches(0.5), Inches(8), Inches(1))
+        heading.text = f"Bài học {number}"
+        heading.text_frame.paragraphs[0].runs[0].font.size = Pt(32)
+        body = slide.shapes.add_textbox(Inches(1), Inches(2), Inches(8), Inches(1))
+        body.text = f"Nội dung slide {number}"
+        body.text_frame.paragraphs[0].runs[0].font.size = Pt(18)
+    deck.save(path)
+
+    pages = extract_document(path)
+    assert [page.section for page in pages] == ["Bài học 1", "Bài học 2"]
+    chunks, nodes = build_hierarchy(pages, doc_id="deck", course="Học tập", source_type="slide", file_type="pptx", chunk_tokens=50, overlap_tokens=0)
+    assert {(chunk.page, chunk.page_end) for chunk in chunks} == {(1, 1), (2, 2)}
+    validate_hierarchy(chunks, nodes)
+
+
 def test_hierarchical_chunks_keep_slide_sources_separate_with_shared_section():
     pages = [
         PageText(1, "GIAO DỊCH", "GIAO DỊCH\nTính nguyên tử."),
@@ -182,6 +206,22 @@ def test_chunk_citations_cover_only_pages_in_each_window():
     assert (chunks[-1].page, chunks[-1].page_end) == (2, 2)
 
 
+def test_chunking_preserves_paragraph_boundaries_until_a_paragraph_is_too_long():
+    blocks = [
+        PageText(1, "Unit 1", "alpha beta gamma delta"),
+        PageText(2, "Unit 1", "epsilon zeta eta theta"),
+        PageText(3, "Unit 1", "iota kappa lambda mu"),
+    ]
+    chunks, nodes = build_hierarchy(
+        blocks, doc_id="d", course="Biology", source_type="docx",
+        file_type="docx", chunk_tokens=12, overlap_tokens=3,
+    )
+    assert [(chunk.page, chunk.page_end) for chunk in chunks] == [(1, 2), (3, 3)]
+    assert [chunk.word_start for chunk in chunks] == [0, 12]
+    assert [chunk.word_end for chunk in chunks] == [12, 18]
+    validate_hierarchy(chunks, nodes)
+
+
 def test_docx_headings_and_tables_keep_reading_order(tmp_path):
     path = tmp_path / "book.docx"
     document = Document()
@@ -201,6 +241,82 @@ def test_docx_headings_and_tables_keep_reading_order(tmp_path):
     chunks, _ = build_hierarchy(blocks, doc_id="d", course="Lịch sử", source_type="docx", chunk_tokens=50, overlap_tokens=5)
     assert "[Đoạn 1]" in chunks[0].text
     assert "[Trang" not in chunks[0].text
+
+
+def test_docx_flat_heading_styles_keep_chapter_numbering_scope(tmp_path):
+    path = tmp_path / "lecture.docx"
+    document = Document()
+    for title, body in (
+        ("Chương 2", None),
+        ("NỘI DUNG CHƯƠNG HAI", None),
+        ("II. Mục cuối", "Cuối chương hai"),
+        ("Chương 3", None),
+        ("NỘI DUNG CHƯƠNG BA", "Dẫn nhập chương ba"),
+        ("I. Mục đầu", "Đầu chương ba"),
+    ):
+        document.add_heading(title, level=1)
+        if body:
+            document.add_paragraph(body)
+    document.add_heading("Chi tiết", level=2)
+    document.add_paragraph("Nội dung chi tiết")
+    bold_heading = document.add_paragraph()
+    bold_heading.add_run("II. Mục tiếp theo").bold = True
+    document.add_paragraph("Nội dung mục II")
+    bold_heading = document.add_paragraph()
+    bold_heading.add_run("1. Tiểu mục").bold = True
+    document.add_paragraph("Nội dung tiểu mục")
+    document.add_heading("KẾT LUẬN", level=1)
+    document.add_paragraph("Tóm lược")
+    document.save(path)
+
+    pages = extract_document(path)
+    assert [page.section for page in pages] == [
+        "Chương 2: NỘI DUNG CHƯƠNG HAI > II. Mục cuối",
+        "Chương 3: NỘI DUNG CHƯƠNG BA",
+        "Chương 3: NỘI DUNG CHƯƠNG BA > I. Mục đầu",
+        "Chương 3: NỘI DUNG CHƯƠNG BA > I. Mục đầu > Chi tiết",
+        "Chương 3: NỘI DUNG CHƯƠNG BA > II. Mục tiếp theo",
+        "Chương 3: NỘI DUNG CHƯƠNG BA > II. Mục tiếp theo > 1. Tiểu mục",
+        "KẾT LUẬN",
+    ]
+
+
+def test_docx_numbering_infers_depth_without_subject_specific_titles(tmp_path):
+    path = tmp_path / "handbook.docx"
+    document = Document()
+    for heading, body in (
+        ("Unit 1", None),
+        ("Cell structure", None),
+        ("1. Introduction", "Overview"),
+        ("1.1 Components", "Details"),
+        ("2. Methods", "Procedures"),
+        ("Unit 2", None),
+        ("Genetics", None),
+        ("1. Introduction", "New unit"),
+    ):
+        document.add_heading(heading, level=1)
+        if body:
+            document.add_paragraph(body)
+    document.save(path)
+    assert [page.section for page in extract_document(path)] == [
+        "Unit 1: Cell structure > 1. Introduction",
+        "Unit 1: Cell structure > 1. Introduction > 1.1 Components",
+        "Unit 1: Cell structure > 2. Methods",
+        "Unit 2: Genetics > 1. Introduction",
+    ]
+
+
+def test_docx_custom_outline_style_is_a_heading(tmp_path):
+    path = tmp_path / "custom.docx"
+    document = Document()
+    style = document.styles.add_style("CourseSection", WD_STYLE_TYPE.PARAGRAPH)
+    outline = OxmlElement("w:outlineLvl")
+    outline.set(qn("w:val"), "0")
+    style.element.get_or_add_pPr().append(outline)
+    document.add_paragraph("Course overview", style="CourseSection")
+    document.add_paragraph("Learning outcomes")
+    document.save(path)
+    assert extract_document(path)[0].section == "Course overview"
 
 
 def test_corpus_persists_navigable_document_section_leaf_tree(tmp_path):
@@ -243,6 +359,19 @@ def test_pdf_without_outline_does_not_invent_section_from_first_line(tmp_path):
     assert extract_document(path)[0].section == ""
     chunks, _ = build_hierarchy(extract_document(path), doc_id="d", course="M", source_type="textbook", chunk_tokens=50, overlap_tokens=5)
     assert chunks[0].section == ""
+
+
+def test_landscape_pdf_slide_uses_prominent_title_without_bookmarks(tmp_path):
+    path = tmp_path / "slides.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=720, height=540)
+    page.insert_text((70, 60), "Cell structure", fontsize=32)
+    page.insert_text((70, 180), "A cell has a membrane", fontsize=18)
+    page.insert_text((70, 220), "and genetic material", fontsize=18)
+    page.insert_text((680, 520), "1", fontsize=10)
+    document.save(path)
+    document.close()
+    assert extract_document(path)[0].section == "Cell structure"
 
 
 def test_ocr_quality_gate_rejects_diagram_noise():

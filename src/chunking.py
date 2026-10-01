@@ -64,6 +64,31 @@ def validate_hierarchy(chunks: list[Chunk], nodes: list[dict]) -> dict[str, dict
     return hierarchy
 
 
+def _content_windows(spans: list[tuple[int, int]], limit: int, overlap: int):
+    position = 0
+    while position < len(spans):
+        start = spans[position][0]
+        end_block = position
+        while end_block < len(spans) and spans[end_block][1] - start <= limit:
+            end_block += 1
+        if end_block == position:
+            block_end = spans[position][1]
+            while start < block_end:
+                end = min(start + limit, block_end)
+                yield start, end
+                if end == block_end:
+                    break
+                start = end - overlap
+            position += 1
+            continue
+        yield start, spans[end_block - 1][1]
+        next_position = end_block
+        if end_block < len(spans):
+            while next_position > position + 1 and spans[end_block][1] - spans[next_position - 1][0] <= limit and spans[end_block - 1][1] - spans[next_position - 1][0] <= overlap:
+                next_position -= 1
+        position = next_position
+
+
 def build_hierarchy(
     pages: list[PageText],
     *,
@@ -79,6 +104,7 @@ def build_hierarchy(
         raise ValueError("chunk_tokens must be positive and overlap smaller than chunk_tokens")
     nodes: dict[str, dict] = {}
     words_by_node: dict[str, list[tuple[str, int]]] = {}
+    spans_by_node: dict[str, list[tuple[int, int]]] = {}
     node_number = 0
 
     def add_node(kind: str, node_title: str, parent_id: str | None, path: str = "") -> str:
@@ -87,6 +113,7 @@ def build_hierarchy(
         node_id = hashlib.sha256(f"{doc_id}|{node_number}|{kind}|{node_title}".encode()).hexdigest()[:24]
         nodes[node_id] = {"node_id": node_id, "parent_id": parent_id, "doc_id": doc_id, "kind": kind, "title": node_title, "path": path, "text": "", "children": []}
         words_by_node[node_id] = []
+        spans_by_node[node_id] = []
         if parent_id:
             nodes[parent_id]["children"].append(node_id)
         return node_id
@@ -110,7 +137,9 @@ def build_hierarchy(
             parent_id if locator == "Đoạn"
             else add_node("page", f"{locator} {page.page}", parent_id, nodes[parent_id]["path"])
         )
+        start = len(words_by_node[target_id])
         words_by_node[target_id].extend((word, page.page) for word in f"[{locator} {page.page}] {page.text}".split())
+        spans_by_node[target_id].append((start, len(words_by_node[target_id])))
 
     chunks: list[Chunk] = []
     for node_id, node in nodes.items():
@@ -118,9 +147,8 @@ def build_hierarchy(
         if not tagged_words:
             continue
         node["text"] = " ".join(word for word, _ in tagged_words)
-        step = chunk_tokens - overlap_tokens
-        for index, start in enumerate(range(0, len(tagged_words), step)):
-            window = tagged_words[start : start + chunk_tokens]
+        for start, end in _content_windows(spans_by_node[node_id], chunk_tokens, overlap_tokens):
+            window = tagged_words[start:end]
             body = " ".join(word for word, _ in window)
             if not body:
                 continue
@@ -132,6 +160,4 @@ def build_hierarchy(
             ).hexdigest()[:24]
             chunks.append(Chunk(digest, doc_id, course, source_type, first_page, section, text, last_page, node_id, start, start + len(window), file_type))
             node["children"].append(digest)
-            if start + chunk_tokens >= len(tagged_words):
-                break
     return chunks, list(nodes.values())

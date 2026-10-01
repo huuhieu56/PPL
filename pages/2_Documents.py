@@ -85,14 +85,14 @@ if documents:
     selected_chunks = [chunk for chunk in chunks if chunk.doc_id == preview_id]
     st.caption(f"{len(selected_chunks)} chunk · chọn một chunk để đọc toàn bộ nội dung và kiểm tra ranh giới cắt.")
     st.dataframe([
-        {"Chunk": number, "Trang/slide": f"{chunk.page}–{chunk.page_end or chunk.page}", "Mục": chunk.section,
+        {"Chunk": number, "Vị trí": f"{'Đoạn' if chunk.file_type == 'docx' else 'Trang/slide'} {chunk.page}–{chunk.page_end or chunk.page}", "Mục": chunk.section,
          "Khoảng từ": f"{chunk.word_start}–{chunk.word_end}", "Nội dung": chunk.text[:160]}
         for number, chunk in enumerate(selected_chunks, 1)
     ], width="stretch", hide_index=True)
     if selected_chunks:
         number = st.selectbox("Xem đầy đủ chunk", range(1, len(selected_chunks) + 1))
         chunk = selected_chunks[number - 1]
-        st.caption(f"ID: {chunk.chunk_id} · nút cha: {chunk.parent_id} · trang/slide {chunk.page}–{chunk.page_end or chunk.page}")
+        st.caption(f"ID: {chunk.chunk_id} · nút cha: {chunk.parent_id} · {'đoạn' if chunk.file_type == 'docx' else 'trang/slide'} {chunk.page}–{chunk.page_end or chunk.page}")
         st.text_area("Nội dung chunk", chunk.text, height=240, disabled=True)
 
     with st.expander("Xóa một tài liệu"):
