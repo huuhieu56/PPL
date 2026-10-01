@@ -20,6 +20,12 @@ def test_student_cannot_execute_admin_page_even_without_navigation(page):
     assert len(app.button) == 0
 
 
+def test_unauthenticated_documents_page_does_not_crash():
+    app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "pages" / "2_Documents.py"))
+    app.run(timeout=30)
+    assert not app.exception
+
+
 def test_citation_uses_readable_source_name():
     citation = {"number": 1, "doc_id": "sha123", "page": 4, "page_end": 5}
     assert citation_label(citation, {"sha123": "Giáo trình Toán.pdf"}) == "[1] Giáo trình Toán.pdf — trang/slide 4–5"

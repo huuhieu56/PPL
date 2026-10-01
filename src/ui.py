@@ -41,7 +41,11 @@ def authenticate(db: Database, username: str, password: str) -> dict | None:
 def require_role(*roles: str) -> dict:
     user = st.session_state.get("user")
     if not user:
-        st.switch_page(st.session_state.home_page)
+        if home := st.session_state.get("home_page"):
+            st.switch_page(home)
+        st.warning("Vui lòng đăng nhập để tiếp tục.")
+        st.markdown("[Đến trang đăng nhập](/)")
+        st.stop()
     if roles and user["role"] not in roles:
         st.error("Bạn không có quyền truy cập trang này.")
         st.stop()
