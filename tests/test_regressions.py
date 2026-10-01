@@ -12,7 +12,7 @@ from src.storage import Database
 from src.ui import citation_label, stage_uploads
 from src.models import RagConfig
 import src.rag as rag
-from src.corpus import index_corpus
+from src.corpus import index_corpus, remove_document
 
 
 def test_docx_locator_independent_of_course_type():
@@ -108,6 +108,50 @@ def test_failed_index_does_not_publish_corpus(tmp_path, monkeypatch):
         )
     assert db.get_active_corpus() is None
     assert db.list_documents() == []
+
+
+def test_remove_document_rebuilds_active_corpus_and_deletes_its_data(tmp_path, monkeypatch):
+    from qdrant_client import QdrantClient
+
+    client = QdrantClient(":memory:")
+    monkeypatch.setattr("src.index.make_qdrant_client", lambda: client)
+    monkeypatch.setattr("src.index.embed_documents", lambda texts, *_args: [[1.0, 0.0] for _ in texts])
+    settings = load_settings(tmp_path)
+    db = Database(settings.db_path)
+    db.initialize()
+    staging = settings.data_dir / "raw" / "staging"
+    files = []
+    for number in (1, 2):
+        path = staging / str(number) / f"lesson-{number}.pdf"
+        path.parent.mkdir(parents=True)
+        document = pymupdf.open()
+        page = document.new_page()
+        page.insert_text((50, 50), f"Lesson {number}: cells and tissues in biology.")
+        document.save(path)
+        files.append(path)
+    metadata = {str(path): {"course": "Sinh học", "source_type": "textbook"} for path in files}
+    chunking = {"chunk_tokens": 100, "overlap_tokens": 0}
+    retrieval = {"tokenizer": "whitespace", "embedding_model": "test"}
+    old = index_corpus(files, metadata, settings, db, chunking, retrieval)
+    removed_id = next(item["doc_id"] for item in db.list_documents() if item["filename"] == files[0].name)
+
+    remove_document(removed_id, settings, db, chunking, retrieval)
+
+    active = db.get_active_corpus()
+    assert active["version_id"] != old.version_id
+    assert [item["filename"] for item in db.list_documents()] == [files[1].name]
+    assert not files[0].exists() and files[1].exists()
+    assert not client.collection_exists(f"ppl_{old.version_id}")
+    assert client.count(f"ppl_{active['version_id']}", exact=True).count == active["chunk_count"]
+    assert not (settings.data_dir / "processed" / old.version_id).exists()
+    assert not (settings.data_dir / "indexes" / old.version_id).exists()
+
+    remaining_id = db.list_documents()[0]["doc_id"]
+    remove_document(remaining_id, settings, db, chunking, retrieval)
+    assert db.get_active_corpus() is None
+    assert db.list_documents() == []
+    assert not files[1].exists()
+    assert not client.collection_exists(f"ppl_{active['version_id']}")
 
 
 def test_chat_history_is_private_to_its_owner(tmp_path):

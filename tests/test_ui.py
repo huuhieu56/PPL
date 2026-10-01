@@ -7,6 +7,7 @@ import pytest
 from src.config import load_settings
 from src.storage import Database
 from src.ui import citation_label
+from src.models import Chunk
 
 
 @pytest.mark.parametrize("page", ["2_Documents.py", "3_RAG_Settings.py"])
@@ -68,6 +69,29 @@ def test_documents_page_shows_active_hierarchy_counts(tmp_path, monkeypatch):
     app.run(timeout=30).switch_page("pages/2_Documents.py").run(timeout=30)
     assert not app.exception
     assert any("42 chunk lá" in item.value and "9 nút cấu trúc" in item.value for item in app.caption)
+
+
+def test_admin_can_submit_upload_and_inspect_saved_chunk(tmp_path, monkeypatch):
+    settings = load_settings(tmp_path)
+    db = Database(settings.db_path)
+    db.initialize()
+    corpus = settings.data_dir / "processed" / "test-version"
+    corpus.mkdir(parents=True)
+    (corpus / "manifest.json").write_text(json.dumps({"documents": [{"doc_id": "doc-1", "course": "Sinh học"}]}), encoding="utf-8")
+    chunk = Chunk("chunk-1", "doc-1", "Sinh học", "slide", 3, "Tế bào", "Tế bào là đơn vị cơ bản của sự sống.")
+    (corpus / "chunks.jsonl").write_text(json.dumps(chunk.to_dict(), ensure_ascii=False) + "\n", encoding="utf-8")
+    db.publish_corpus([{"doc_id": "doc-1", "filename": "biology.pdf", "source_path": str(tmp_path / "biology.pdf")}], {
+        "version_id": "test-version", "chunks_path": str(corpus / "chunks.jsonl"), "chunk_count": 1, "node_count": 1,
+    })
+    monkeypatch.setattr("src.config.load_settings", lambda: settings)
+    monkeypatch.setattr("src.ui.load_settings", lambda: settings)
+    app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"))
+    app.session_state["user"] = {"username": "admin", "role": "admin"}
+    app.run().switch_page("pages/2_Documents.py").run()
+    assert not app.exception
+    assert any(button.label == "Bắt đầu xử lý" for button in app.button)
+    assert any(button.label == "Xóa tài liệu" for button in app.button)
+    assert any("Tế bào là đơn vị cơ bản" in area.value for area in app.text_area)
 
 
 def test_overview_counts_active_manifest_not_historical_registry(tmp_path, monkeypatch):

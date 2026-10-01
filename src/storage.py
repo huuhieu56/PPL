@@ -183,6 +183,19 @@ class Database:
             return None
         return {"version_id": row["version_id"], **json.loads(row["metadata_json"])}
 
+    def list_corpus_versions(self) -> list[str]:
+        with self._connect() as connection:
+            rows = connection.execute("SELECT version_id FROM corpus_versions").fetchall()
+        return [row["version_id"] for row in rows]
+
+    def finish_document_removal(self, doc_id: str, keep_version: str | None) -> None:
+        with self._connect() as connection:
+            connection.execute("DELETE FROM documents WHERE doc_id = ?", (doc_id,))
+            if keep_version is None:
+                connection.execute("DELETE FROM corpus_versions")
+            else:
+                connection.execute("DELETE FROM corpus_versions WHERE version_id != ?", (keep_version,))
+
     def save_message(self, record: dict) -> str:
         message_id = record.get("message_id", uuid.uuid4().hex)
         payload = {key: value for key, value in record.items() if key not in {"message_id", "session_id", "username"}}

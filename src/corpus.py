@@ -3,6 +3,7 @@
 import json
 import hashlib
 import os
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,7 @@ from src.documents import extract_document
 from src.models import Chunk
 from src.embeddings import embedding_config
 from src.index import RetrievalIndex
+from src import index as index_module
 
 
 @dataclass(frozen=True)
@@ -139,3 +141,48 @@ def index_corpus(
         "node_count": len(nodes),
     })
     return corpus
+
+
+def remove_document(doc_id: str, settings, database, chunking: dict, retrieval: dict) -> bool:
+    """Rebuild the live corpus without one document, then discard its old data."""
+    active = database.get_active_corpus()
+    if not active:
+        raise ValueError("Không có corpus đang hoạt động")
+    manifest = json.loads((Path(active["chunks_path"]).parent / "manifest.json").read_text(encoding="utf-8"))
+    if doc_id not in {item["doc_id"] for item in manifest["documents"]}:
+        raise ValueError("Tài liệu không thuộc corpus đang hoạt động")
+    records = {item["doc_id"]: item for item in database.list_documents()}
+    source = Path(records[doc_id]["source_path"]).resolve()
+    remaining = [records[item["doc_id"]] for item in manifest["documents"] if item["doc_id"] != doc_id]
+    keep_version = None
+    if remaining:
+        paths = [Path(item["source_path"]) for item in remaining]
+        metadata = {
+            str(path): {key: item[key] for key in ("course", "source_type", "semester") if key in item}
+            for path, item in zip(paths, remaining)
+        }
+        keep_version = index_corpus(paths, metadata, settings, database, chunking, retrieval).version_id
+
+    client = index_module.make_qdrant_client()
+    for version in database.list_corpus_versions():
+        if version == keep_version:
+            continue
+        if not re.fullmatch(r"[0-9a-f]{16}", version):
+            raise ValueError(f"Unsafe corpus version ID: {version}")
+        collection = f"ppl_{version}"
+        if client.collection_exists(collection):
+            client.delete_collection(collection)
+        for folder in ("indexes", "processed"):
+            directory = settings.data_dir / folder / version
+            if directory.exists():
+                shutil.rmtree(directory)
+
+    database.finish_document_removal(doc_id, keep_version)
+    managed_source = source.is_relative_to((settings.data_dir / "raw").resolve())
+    if managed_source and source.is_file():
+        source.unlink()
+        try:
+            source.parent.rmdir()
+        except OSError:
+            pass
+    return managed_source
