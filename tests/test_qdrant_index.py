@@ -1,4 +1,6 @@
 import json
+import sys
+import types
 from types import SimpleNamespace
 
 import pytest
@@ -13,7 +15,12 @@ from src.retrieval import minmax_scores
 
 
 @pytest.fixture(autouse=True)
-def clear_encoder_cache():
+def clear_encoder_cache(monkeypatch):
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "local")
+    monkeypatch.delenv("EMBEDDING_MODEL", raising=False)
+    module = types.ModuleType("sentence_transformers")
+    module.SentenceTransformer = None
+    monkeypatch.setitem(sys.modules, "sentence_transformers", module)
     load_encoder.cache_clear()
     yield
     load_encoder.cache_clear()

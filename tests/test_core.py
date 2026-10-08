@@ -16,7 +16,7 @@ from src.corpus import build_corpus
 from src.documents import PageText, extract_document, usable_ocr
 from src.models import Chunk, RagConfig, SearchResult
 from src.rag import answer_question
-from src.reranking import _load_model
+from src.reranking import rerank
 from src.retrieval import adaptive_alpha, fuse_weighted, minmax_scores, retrieve
 from src.storage import Database
 
@@ -62,7 +62,7 @@ def test_rag_uses_expanded_parent_context_and_cites_its_full_span(monkeypatch):
             return SimpleNamespace(text="Trả lời [1].", usage_metadata=None)
 
     client = Completions()
-    answer = answer_question("Hỏi về bài 1", Index(), RagConfig(context_parent_words=20), client, "test")
+    answer = answer_question("Hỏi về bài 1", Index(), RagConfig(context_parent_words=20, use_reranker=False), client, "test")
     assert answer.citations[0]["page_end"] == 2
     assert "Nội dung bổ sung" in answer.citations[0]["text"]
 
@@ -84,29 +84,35 @@ def test_rag_does_not_repeat_overlapping_parent_context(monkeypatch):
             assert prompt.count("Tài liệu: d2") == 1
             return SimpleNamespace(text="Kết quả [1] [2].", usage_metadata=None)
 
-    answer = answer_question("Hỏi", Index(), RagConfig(context_k=2), Completions(), "test")
+    answer = answer_question("Hỏi", Index(), RagConfig(context_k=2, use_reranker=False), Completions(), "test")
     assert [citation["chunk_id"] for citation in answer.citations] == ["a", "c"]
 
 
-def test_reranker_stays_on_cpu_when_gpu_has_only_four_gigabytes(monkeypatch):
-    import torch
+def test_reranker_api_orders_candidates_and_rejects_invalid_indices(monkeypatch):
+    import io
+    import pytest
 
-    seen = {}
+    monkeypatch.setenv("EMBEDDING_API_KEY", "test-key")
+    candidates = [SearchResult(Chunk(key, "d", "M", "slide", 1, "", key), 1.0, rank, "rrf") for rank, key in enumerate(("a", "b"), 1)]
+    items = [{"index": 1, "relevance_score": 0.9}, {"index": 0, "relevance_score": 0.1}]
 
-    def fake_cross_encoder(name, **kwargs):
-        seen.update(kwargs)
-        return object()
+    def respond(request, timeout):
+        assert request.full_url == "https://openrouter.ai/api/v1/rerank"
+        payload = json.loads(request.data)
+        assert payload["documents"] == ["a", "b"] and payload["top_n"] == 2
+        assert payload["model"] == "voyageai/rerank-2.5-lite" and timeout == 30
+        return io.BytesIO(json.dumps({"results": items}).encode())
 
-    monkeypatch.setattr("sentence_transformers.CrossEncoder", fake_cross_encoder)
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-    monkeypatch.setattr(torch.cuda, "get_device_properties", lambda _index: SimpleNamespace(total_memory=4 * 1024**3))
-    _load_model.cache_clear()
-    _load_model("test-reranker")
-    assert seen["device"] == "cpu"
-    _load_model.cache_clear()
-    _load_model("BAAI/bge-reranker-v2-m3")
-    assert seen["revision"] == "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e"
-    _load_model.cache_clear()
+    monkeypatch.setattr("src.reranking.urlopen", respond)
+    ranked, _ = rerank("question", candidates)
+    assert [result.chunk.chunk_id for result in ranked] == ["b", "a"]
+    assert [result.rank for result in ranked] == [1, 2]
+    items[0]["index"] = 0
+    with pytest.raises(ValueError, match="indices"):
+        rerank("question", candidates)
+    monkeypatch.delenv("EMBEDDING_API_KEY")
+    with pytest.raises(ValueError, match="EMBEDDING_API_KEY"):
+        rerank("question", candidates)
 
 
 def test_ingestion_preserves_source_and_reading_order(tmp_path):

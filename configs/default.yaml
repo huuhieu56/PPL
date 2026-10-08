@@ -2,7 +2,6 @@ retrieval:
   method: rrf
   tokenizer: whitespace
   embedding_model: BAAI/bge-m3
-  reranker_model: BAAI/bge-reranker-v2-m3
   top_l: 100
   rerank_n: 20
   context_k: 5
