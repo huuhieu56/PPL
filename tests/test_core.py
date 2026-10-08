@@ -35,8 +35,8 @@ def test_foundation_round_trip(tmp_path, monkeypatch):
     assert "must-not-be-persisted" not in json.dumps(saved)
 
 
-def test_interactive_default_uses_fast_measured_baseline():
-    assert RagConfig().method == "dense"
+def test_interactive_default_uses_hybrid_with_reranker():
+    assert RagConfig().method == "rrf"
     assert RagConfig().use_reranker is True
 
 

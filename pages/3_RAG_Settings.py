@@ -12,8 +12,8 @@ db = database()
 st.title("Cấu hình RAG")
 
 with st.form("rag_config"):
-    name = st.text_input("Tên cấu hình", "dense-default")
-    method = st.selectbox("Phương pháp", ["bm25", "dense", "rrf", "weighted", "adaptive"], index=1)
+    name = st.text_input("Tên cấu hình", "hybrid-default")
+    method = st.selectbox("Phương pháp", ["bm25", "dense", "rrf", "weighted", "adaptive"], index=2)
     use_reranker = st.checkbox("Dùng reranker", True)
     top_l = st.number_input("Top-L mỗi retriever", 10, 500, 100)
     rerank_n = st.number_input("Candidate rerank", 5, 100, 20)

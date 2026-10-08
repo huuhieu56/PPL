@@ -1,5 +1,5 @@
 retrieval:
-  method: dense
+  method: rrf
   tokenizer: whitespace
   embedding_model: BAAI/bge-m3
   reranker_model: BAAI/bge-reranker-v2-m3

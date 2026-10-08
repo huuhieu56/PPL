@@ -30,7 +30,7 @@ class SearchResult:
 
 @dataclass(frozen=True)
 class RagConfig:
-    method: str = "dense"
+    method: str = "rrf"
     top_l: int = 100
     rerank_n: int = 20
     context_k: int = 5
