@@ -22,3 +22,9 @@ runs/
 .cache/
 *.db
 *.sqlite3
+
+# Eval outputs and local textbook PDFs
+/eval/*
+!/eval/*.py
+!/eval/*.md
+/data/**/*.pdf
