@@ -39,7 +39,7 @@ class RagConfig:
     adaptive_beta: float = 0.3
     rrf_k: int = 60
     refusal_threshold: float = 0.0
-    use_reranker: bool = False
+    use_reranker: bool = True
     model: str = ""
     temperature: float = 0.0
 

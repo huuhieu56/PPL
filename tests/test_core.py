@@ -37,7 +37,7 @@ def test_foundation_round_trip(tmp_path, monkeypatch):
 
 def test_interactive_default_uses_fast_measured_baseline():
     assert RagConfig().method == "dense"
-    assert RagConfig().use_reranker is False
+    assert RagConfig().use_reranker is True
 
 
 def test_greeting_does_not_start_retrieval_or_llm(monkeypatch):

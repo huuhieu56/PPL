@@ -11,4 +11,4 @@ retrieval:
   adaptive_beta: 0.3
   rrf_k: 60
   refusal_threshold: 0.0
-  use_reranker: false
+  use_reranker: true
