@@ -174,5 +174,5 @@ def test_generated_answer_without_valid_source_is_refused(monkeypatch, text):
     chunk = Chunk("c1", "d1", "Sinh học", "textbook", 1, "", "Tế bào là đơn vị cấu trúc.")
     monkeypatch.setattr(rag, "retrieve", lambda *_args: [SearchResult(chunk, 1.0, 1, "dense")])
     client = SimpleNamespace(invoke=lambda *_args, **_kwargs: SimpleNamespace(text=text, usage_metadata={}))
-    answer = rag.answer_question("Tế bào là gì?", SimpleNamespace(expand_chunk=lambda c, _n: c), RagConfig(), client, "test")
+    answer = rag.answer_question("Tế bào là gì?", SimpleNamespace(expand_chunk=lambda c, _n: c), RagConfig(use_reranker=False), client, "test")
     assert answer.refused and answer.text == rag.REFUSAL_TEXT and not answer.citations
